@@ -24,7 +24,7 @@ module Development.IDE.Core.Shake(
     shakeOpen, shakeShut,
     shakeRun,
     shakeProfile,
-    use, useWithStale, useNoFile, uses, usesWithStale,
+    use, useWithStale, useNoFile, useWithStaleNoFile, uses, usesWithStale,
     use_, useNoFile_, uses_,
     define, defineEarlyCutoff, defineOnDisk, needOnDisk, needOnDisks, fingerprintToBS,
     getDiagnostics, unsafeClearDiagnostics,
@@ -444,6 +444,10 @@ useWithStale key file = head <$> usesWithStale key [file]
 
 useNoFile :: IdeRule k v => k -> Action (Maybe v)
 useNoFile key = use key ""
+
+useWithStaleNoFile :: IdeRule k v
+    => k -> Action (Maybe (v, PositionMapping))
+useWithStaleNoFile key = useWithStale key ""
 
 use_ :: IdeRule k v => k -> NormalizedFilePath -> Action v
 use_ key file = head <$> uses_ key [file]

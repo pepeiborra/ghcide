@@ -64,6 +64,7 @@ import DynFlags (xopt)
 import GHC.Generics(Generic)
 
 import qualified Development.IDE.Spans.AtPoint as AtPoint
+import Development.IDE.Core.PositionMapping
 import Development.IDE.Core.Service
 import Development.IDE.Core.Shake
 import Development.Shake.Classes
@@ -85,6 +86,9 @@ useNoFileE k = useE k ""
 usesE :: IdeRule k v => k -> [NormalizedFilePath] -> MaybeT Action [v]
 usesE k = MaybeT . fmap sequence . uses k
 
+usesWithStaleE :: IdeRule k v => k -> [NormalizedFilePath] -> MaybeT Action ([(v, PositionMapping)])
+usesWithStaleE k = MaybeT . fmap sequence . usesWithStale k
+
 defineNoFile :: IdeRule k v => (k -> Action v) -> Rules ()
 defineNoFile f = define $ \k file -> do
     if file == "" then do res <- f k; return ([], Just res) else
@@ -102,11 +106,11 @@ getDependencies file = fmap transitiveModuleDeps <$> use GetDependencies file
 -- | Try to get hover text for the name under point.
 getAtPoint :: NormalizedFilePath -> Position -> Action (Maybe (Maybe Range, [T.Text]))
 getAtPoint file pos = fmap join $ runMaybeT $ do
-  opts <- lift getIdeOptions
+  opts  <- lift getIdeOptions
   spans <- useE GetSpanInfo file
   files <- transitiveModuleDeps <$> useE GetDependencies file
-  tms   <- usesE TypeCheck (file : files)
-  return $ AtPoint.atPoint opts (map tmrModule tms) spans pos
+  tms   <- usesWithStaleE TypeCheck (file : files)
+  return $ AtPoint.atPoint opts (map (tmrModule . fst) tms) spans pos
 
 -- | Goto Definition.
 getDefinition :: NormalizedFilePath -> Position -> Action (Maybe Location)
@@ -114,7 +118,7 @@ getDefinition file pos = fmap join $ runMaybeT $ do
     opts <- lift getIdeOptions
     spans <- useE GetSpanInfo file
     pkgState <- hscEnv <$> useE GhcSession file
-    let getHieFile x = useNoFile (GetHieFile x)
+    let getHieFile x = fmap fst <$> useWithStaleNoFile (GetHieFile x)
     lift $ AtPoint.gotoDefinition getHieFile opts pkgState spans pos
 
 -- | Parse the contents of a daml file.
