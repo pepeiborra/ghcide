@@ -16,9 +16,11 @@ import Development.IDE.Types.Location
 -- DAML compiler and infrastructure
 import Development.Shake
 import Development.IDE.GHC.Util
+import Development.IDE.SpanMap
 import Development.IDE.GHC.Compat
 import Development.IDE.Types.Options
 import           Development.IDE.Spans.Type as SpanInfo
+
 
 -- GHC API imports
 import Avail
@@ -32,7 +34,7 @@ import Control.Monad.Extra
 import Control.Monad.Trans.Maybe
 import Control.Monad.IO.Class
 import           Data.Maybe
-import           Data.List
+import           Data.List.Extra
 import qualified Data.Text as T
 
 -- | Locate the definition of the name at a given position.
@@ -41,7 +43,7 @@ gotoDefinition
   => (FilePath -> m (Maybe HieFile))
   -> IdeOptions
   -> HscEnv
-  -> [SpanInfo]
+  -> SpanMap
   -> Position
   -> m (Maybe Location)
 gotoDefinition getHieFile ideOpts pkgState srcSpans pos =
@@ -51,11 +53,13 @@ gotoDefinition getHieFile ideOpts pkgState srcSpans pos =
 atPoint
   :: IdeOptions
   -> [TypecheckedModule]
-  -> [SpanInfo]
+  -> SpanMap
   -> Position
   -> Maybe (Maybe Range, [T.Text])
 atPoint IdeOptions{..} tcs srcSpans pos = do
-    firstSpan <- listToMaybe $ deEmpasizeGeneratedEqShow $ spansAtPoint pos srcSpans
+    firstSpan <- case spansAtPoint pos srcSpans of
+      [] -> Nothing
+      xx -> Just $ minimumOn rankMatch xx
     return (Just (range firstSpan), hoverInfo firstSpan)
   where
     -- Hover info for types, classes, type variables
@@ -70,7 +74,7 @@ atPoint IdeOptions{..} tcs srcSpans pos = do
        mbName = getNameM spaninfoSource
 
     -- Hover info for values/data
-    hoverInfo SpanInfo{spaninfoType = (Just typ), ..} =
+    hoverInfo SpanInfo{spaninfoType = Just typ , ..} =
        documentation <> (wrapLanguageSyntax <$> nameOrSource <> typeAnnotation) <> location
      where
        mbName = getNameM spaninfoSource
@@ -92,23 +96,21 @@ atPoint IdeOptions{..} tcs srcSpans pos = do
     colon = if optNewColonConvention then ": " else ":: "
     wrapLanguageSyntax x = T.unlines [ "```" <> T.pack optLanguageSyntax, x, "```"]
 
-    -- NOTE(RJR): This is a bit hacky.
-    -- We don't want to show the user type signatures generated from Eq and Show
-    -- instances, as they do not appear in the source program.
-    -- However the user could have written an `==` or `show` function directly,
-    -- in which case we still want to show information for that.
-    -- Hence we just move such information later in the list of spans.
-    deEmpasizeGeneratedEqShow :: [SpanInfo] -> [SpanInfo]
-    deEmpasizeGeneratedEqShow = uncurry (++) . partition (not . isTypeclassDeclSpan)
+-- | Rank spans by relevance
+-- We don't want to show the user type signatures generated from derived
+-- instances, as they do not appear in the source program.
+rankMatch :: SpanInfo -> (Bool, (Int, Int))
+rankMatch x = (not(isTypeclassDeclSpan x), spanSize x)
+  where 
     isTypeclassDeclSpan :: SpanInfo -> Bool
     isTypeclassDeclSpan spanInfo =
       case getNameM (spaninfoSource spanInfo) of
         Just name -> any (`isInfixOf` getOccString name) ["==", "showsPrec"]
         Nothing -> False
 
-locationsAtPoint :: forall m . MonadIO m => (FilePath -> m (Maybe HieFile)) -> IdeOptions -> HscEnv -> Position -> [SpanInfo] -> m [Location]
+locationsAtPoint :: forall m . MonadIO m => (FilePath -> m (Maybe HieFile)) -> IdeOptions -> HscEnv -> Position -> SpanMap -> m [Location]
 locationsAtPoint getHieFile IdeOptions{..} pkgState pos =
-    fmap (map srcSpanToLocation) . mapMaybeM (getSpan . spaninfoSource) . spansAtPoint pos
+    fmap (map srcSpanToLocation) . mapMaybeM (getSpan . spaninfoSource) . sortOn rankMatch . spansAtPoint pos
   where getSpan :: SpanSource -> m (Maybe SrcSpan)
         getSpan NoSource = pure Nothing
         getSpan (SpanS sp) = pure $ Just sp
@@ -136,18 +138,6 @@ locationsAtPoint getHieFile IdeOptions{..} pkgState pos =
         eqName n n' = nameOccName n == nameOccName n' && nameModule n == nameModule n'
         setFileName f (RealSrcSpan span) = RealSrcSpan (span { srcSpanFile = mkFastString f })
         setFileName _ span@(UnhelpfulSpan _) = span
-
--- | Filter out spans which do not enclose a given point
-spansAtPoint :: Position -> [SpanInfo] -> [SpanInfo]
-spansAtPoint pos = filter atp where
-  line = _line pos
-  cha = _character pos
-  atp SpanInfo{..} =    spaninfoStartLine <= line
-                     && spaninfoEndLine >= line
-                     && spaninfoStartCol <= cha
-                     -- The end col points to the column after the
-                     -- last character so we use > instead of >=
-                     && spaninfoEndCol > cha
 
 showName :: Outputable a => a -> T.Text
 showName = T.pack . prettyprint

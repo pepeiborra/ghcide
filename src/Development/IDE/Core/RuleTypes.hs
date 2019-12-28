@@ -29,6 +29,7 @@ import Development.IDE.GHC.Compat
 
 import           Development.IDE.Core.CompletionsTypes
 import           Development.IDE.Spans.Type
+import           Development.IDE.SpanMap
 
 
 -- NOTATION
@@ -64,6 +65,9 @@ type instance RuleResult TypeCheck = TcModuleResult
 
 -- | Information about what spans occur where, requires TypeCheck
 type instance RuleResult GetSpanInfo = [SpanInfo]
+
+
+type instance RuleResult GetSpanMap = SpanMap
 
 -- | Convert to Core, requires TypeCheck*
 type instance RuleResult GenerateCore = (SafeHaskellMode, CgGuts, ModDetails)
@@ -131,6 +135,12 @@ data GetSpanInfo = GetSpanInfo
 instance Hashable GetSpanInfo
 instance NFData   GetSpanInfo
 instance Binary   GetSpanInfo
+
+data GetSpanMap = GetSpanMap
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetSpanMap
+instance NFData   GetSpanMap
+instance Binary   GetSpanMap
 
 data GenerateCore = GenerateCore
     deriving (Eq, Show, Typeable, Generic)
