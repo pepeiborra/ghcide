@@ -38,6 +38,7 @@ import Development.IDE.Spans.Calculate
 import Development.IDE.Import.DependencyInformation
 import Development.IDE.Import.FindImports
 import           Development.IDE.Core.FileStore
+import Development.IDE.SpanMap
 import           Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
 import Development.IDE.GHC.Util
@@ -103,16 +104,16 @@ getDependencies file = fmap transitiveModuleDeps <$> use GetDependencies file
 getAtPoint :: NormalizedFilePath -> Position -> Action (Maybe (Maybe Range, [T.Text]))
 getAtPoint file pos = fmap join $ runMaybeT $ do
   opts <- lift getIdeOptions
-  spans <- useE GetSpanInfo file
   files <- transitiveModuleDeps <$> useE GetDependencies file
   tms   <- usesE TypeCheck (file : files)
+  spans <- useE GetSpanMap file
   return $ AtPoint.atPoint opts (map tmrModule tms) spans pos
 
 -- | Goto Definition.
 getDefinition :: NormalizedFilePath -> Position -> Action (Maybe Location)
 getDefinition file pos = fmap join $ runMaybeT $ do
     opts <- lift getIdeOptions
-    spans <- useE GetSpanInfo file
+    spans <- useE GetSpanMap file
     pkgState <- hscEnv <$> useE GhcSession file
     let getHieFile x = useNoFile (GetHieFile x)
     lift $ AtPoint.gotoDefinition getHieFile opts pkgState spans pos
@@ -257,7 +258,6 @@ getDependenciesRule =
         let mbFingerprints = map (fingerprintString . fromNormalizedFilePath) allFiles <$ optShakeFiles opts
         return (fingerprintToBS . fingerprintFingerprints <$> mbFingerprints, ([], transitiveDeps depInfo file))
 
--- Source SpanInfo is used by AtPoint and Goto Definition.
 getSpanInfoRule :: Rules ()
 getSpanInfoRule =
     define $ \GetSpanInfo file -> do
@@ -266,6 +266,12 @@ getSpanInfoRule =
         packageState <- hscEnv <$> use_ GhcSession file
         x <- liftIO $ getSrcSpanInfos packageState fileImports tc
         return ([], Just x)
+
+-- SpanMap is used by AtPoint and  Goto Definition.
+getSpanMapRule :: Rules ()
+getSpanMapRule = define $ \GetSpanMap file -> do
+    spans <- use_ GetSpanInfo file
+    return ([], Just (genSpanMap spans))
 
 -- Typechecks a module.
 typeCheckRule :: Rules ()
@@ -371,6 +377,7 @@ mainRule = do
     getDependenciesRule
     typeCheckRule
     getSpanInfoRule
+    getSpanMapRule
     generateCoreRule
     generateByteCodeRule
     loadGhcSession

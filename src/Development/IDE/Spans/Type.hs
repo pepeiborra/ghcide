@@ -8,6 +8,7 @@
 module Development.IDE.Spans.Type(
     SpanInfo(..)
   , SpanSource(..)
+  , spanSize
   , getNameM
   ) where
 
@@ -43,6 +44,9 @@ instance Show SpanInfo where
 instance NFData SpanInfo where
     rnf = rwhnf
 
+-- | Size in (# lines, # columns)
+spanSize :: SpanInfo -> (Int,Int)
+spanSize SpanInfo{..} = (spaninfoEndLine - spaninfoStartLine, spaninfoEndCol - spaninfoStartCol)
 
 -- we don't always get a name out so sometimes manually annotating source is more appropriate
 data SpanSource = Named Name
