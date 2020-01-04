@@ -394,6 +394,7 @@ codeActionTests = testGroup "code actions"
   , importRenameActionTests
   , fillTypedHoleTests
   , addSigActionTests
+  , insertNewDefinitionTests
   ]
 
 codeLensesTests :: TestTree
@@ -713,7 +714,7 @@ extendImportTests = testGroup "extend import actions"
             , "import ModuleA as A (stuffA, stuffB)"
             , "main = print (stuffA, stuffB)"
             ])
-  , testSession "extend single line import with type" $ template
+  , testSession "extend single line import with type" $ codeActionTemplate
       (T.unlines
             [ "module ModuleA where"
             , "type A = Double"
@@ -771,7 +772,7 @@ extendImportTests = testGroup "extend import actions"
             , "import qualified ModuleA as A (stuffA, stuffB)"
             , "main = print (A.stuffA, A.stuffB)"
             ])
-  , testSession "extend multi line import with value" $ template
+  , testSession "extend multi line import with value" $ codeActionTemplate
       (T.unlines
             [ "module ModuleA where"
             , "stuffA :: Double"
@@ -806,6 +807,28 @@ extendImportTests = testGroup "extend import actions"
       executeCodeAction action
       contentAfterAction <- documentContents docB
       liftIO $ expectedContentB @=? contentAfterAction
+
+insertNewDefinitionTests :: TestTree
+insertNewDefinitionTests = testGroup "insert new definition actions"
+  [ testSession "insert new function definition" $ do
+      let txtB = 
+            ["data Person = Person { age :: Int}"
+            ,"main = putStrLn $ head $ showByAge [Person{age = Just 10}]"
+            ]
+      docB <- openDoc' "ModuleB.hs" "haskell" (T.unlines txtB) 
+      _ <- waitForDiagnostics
+      CACodeAction action@CodeAction { _title = actionTitle } : _
+                  <- sortOn (\(CACodeAction CodeAction{_title=x}) -> x) <$>
+                     getCodeActions docB (R 1 0 1 50)
+      liftIO $ actionTitle @?= "Define showByAge :: [Person] -> [String]"
+      executeCodeAction action
+      contentAfterAction <- documentContents docB
+      liftIO $ contentAfterAction @?= T.unlines (txtB ++ 
+        [
+          "showByAge :: [Person] -> [String]"
+        , "showByAge = error \"not implemented\""
+        ])
+  ]
 
 fixConstructorImportTests :: TestTree
 fixConstructorImportTests = testGroup "fix import actions"
