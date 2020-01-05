@@ -26,9 +26,11 @@ import System.Environment.Blank (setEnv)
 import System.FilePath
 import System.IO.Extra
 import System.Directory
+import System.Clock
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.ExpectedFailure
+import Text.Printf
 import Data.Maybe
 
 main :: IO ()
@@ -46,6 +48,7 @@ main = defaultMain $ testGroup "HIE"
   , codeLensesTests
   , outlineTests
   , findDefinitionAndHoverTests
+  , hoverPerformanceTests
   , pluginTests
   , preprocessorTests
   , thTests
@@ -838,6 +841,31 @@ addSigLensesTests = let
       ]
     ]
 
+hoverPerformanceTests :: TestTree
+hoverPerformanceTests = testGroup "hover performance" 
+  [ testSession "first hover" $ withTestDataDoc "BenchHover.hs" $ \doc -> do
+      t   <- measureHover doc (Position 0 0)
+      liftIO $ print ("First hover delay", showTimeSpec t)
+
+  , testSession "waiting time grows sublinearly with span position in file" $
+      withTestDataDoc "BenchHover.hs" $ \doc -> do
+      _   <- getHover doc (Position 0 0)
+      tt  <- traverse (\t -> measureHover doc (Position 1 t)) [0, 1000 .. 10000]
+      liftIO $ print ("Duration by line", map showTimeSpec tt)
+  ]
+  where
+    withTestDataDoc sourceFilePath action = do
+      doc <- openTestDataDoc sourceFilePath
+      _   <- waitForDiagnostics
+      action doc
+      closeDoc doc
+    measureHover doc pos = do
+      start <- liftIO $ getTime Monotonic
+      _     <- getHover doc pos
+      end   <- liftIO $ getTime Monotonic
+      let duration = diffTimeSpec end start
+      return duration
+ 
 findDefinitionAndHoverTests :: TestTree
 findDefinitionAndHoverTests = let
 
@@ -1315,3 +1343,6 @@ unitTests = do
      [ testCase "empty file path" $
          uriToFilePath' (fromNormalizedUri $ filePathToUri' "") @?= Just ""
      ]
+
+showTimeSpec :: TimeSpec -> String
+showTimeSpec = printf "%0.3fs" . (/ (1e9::Double)) . realToFrac . toNanoSecs
