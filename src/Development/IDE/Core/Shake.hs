@@ -227,14 +227,17 @@ data IdeState = IdeState
 
 
 -- This is debugging code that generates a series of profiles, if the Boolean is true
-shakeRunDatabaseProfile :: Maybe FilePath -> ShakeDatabase -> [Action a] -> IO [a]
+shakeRunDatabaseProfile :: Maybe FilePath -> ShakeDatabase -> [Action a] -> IO ([a], Maybe FilePath)
 shakeRunDatabaseProfile mbProfileDir shakeDb acts = do
         (time, (res,_)) <- duration $ shakeRunDatabase shakeDb acts
-        whenJust mbProfileDir $ \dir -> do
-            count <- modifyVar profileCounter $ \x -> let !y = x+1 in return (y,y)
-            let file = "ide-" ++ profileStartTime ++ "-" ++ takeEnd 5 ("0000" ++ show count) ++ "-" ++ showDP 2 time <.> "html"
-            shakeProfileDatabase shakeDb $ dir </> file
-        return res
+        proFile <- case mbProfileDir of 
+            Just dir -> do
+                count <- modifyVar profileCounter $ \x -> let !y = x+1 in return (y,y)
+                let file = "ide-" ++ profileStartTime ++ "-" ++ takeEnd 5 ("0000" ++ show count) ++ "-" ++ showDP 2 time <.> "html"
+                shakeProfileDatabase shakeDb $ dir </> file
+                return (Just file)
+            Nothing -> return Nothing
+        return (res, proFile)
     where
 
 {-# NOINLINE profileStartTime #-}
@@ -392,9 +395,12 @@ shakeRun IdeState{shakeExtras=ShakeExtras{..}, ..} acts =
                   let res' = case res of
                           Left e -> "exception: " <> displayException e
                           Right _ -> "completed"
+                      profile = case res of
+                          Right (_, Just fp) -> ", profile saved at file://" <> fp
+                          _ -> ""
                   logDebug logger $ T.pack $
-                      "Finishing shakeRun (took " ++ showDuration runTime ++ ", " ++ res' ++ ")"
-                  signalBarrier bar res
+                      "Finishing shakeRun (took " ++ showDuration runTime ++ ", " ++ res' ++ profile ++ ")"
+                  signalBarrier bar (fst <$> res)
               -- important: we send an async exception to the thread, then wait for it to die, before continuing
               pure (killThread thread >> void (waitBarrier bar), either throwIO return =<< waitBarrier bar))
 

@@ -69,8 +69,8 @@ main = do
     --          then the language server will not work
     Arguments{..} <- getArguments
 
-    if argsVersion then putStrLn ghcideVersion >> exitSuccess
-    else hPutStrLn stderr {- see WARNING above -} ghcideVersion
+    if argsVersion then ghcideVersion >>= putStrLn >> exitSuccess
+    else hPutStrLn stderr {- see WARNING above -} =<< ghcideVersion
 
     -- lock to avoid overlapping output on stdout
     lock <- newLock
@@ -91,7 +91,9 @@ main = do
             -- very important we only call loadSession once, and it's fast, so just do it before starting
             session <- loadSession dir
             let options = (defaultIdeOptions $ return session)
-                    { optReportProgress = clientSupportsProgress caps }
+                    { optReportProgress = clientSupportsProgress caps 
+                    , optShakeProfiling = argsShakeProfiling
+                    }
             initialise (mainRule >> action kick) getLspId event (logger minBound) options vfs
     else do
         putStrLn $ "Ghcide setup tester in " ++ dir ++ "."
