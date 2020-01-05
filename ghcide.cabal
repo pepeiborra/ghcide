@@ -191,6 +191,7 @@ test-suite ghcide-tests
         aeson,
         base,
         bytestring,
+        clock,
         containers,
         directory,
         extra,

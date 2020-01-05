@@ -1,35 +1,38 @@
 -- Copyright (c) 2019 The DAML Authors. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
+{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE PatternSynonyms       #-}
 #include "ghc-api-version.h"
 
 module Main (main) where
 
-import Control.Applicative.Combinators
-import Control.Monad
-import Control.Monad.IO.Class (liftIO)
-import qualified Data.Aeson as Aeson
-import Data.Char (toLower)
-import Data.Foldable
-import Development.IDE.GHC.Util
-import qualified Data.Text as T
-import Development.IDE.Test
-import Development.IDE.Test.Runfiles
-import Development.IDE.Types.Location
-import Language.Haskell.LSP.Test
-import Language.Haskell.LSP.Types
-import Language.Haskell.LSP.Types.Capabilities
-import System.Environment.Blank (setEnv)
-import System.FilePath
-import System.IO.Extra
-import System.Directory
-import Test.Tasty
-import Test.Tasty.HUnit
-import Test.Tasty.ExpectedFailure
-import Data.Maybe
+import           Control.Applicative.Combinators
+import           Control.Monad
+import           Control.Monad.IO.Class                  (liftIO)
+import qualified Data.Aeson                              as Aeson
+import           Data.Char                               (toLower)
+import           Data.Foldable
+import           Data.Maybe
+import qualified Data.Text                               as T
+import           Development.IDE.GHC.Util
+import           Development.IDE.Test
+import           Development.IDE.Test.Runfiles
+import           Development.IDE.Types.Location
+import           Language.Haskell.LSP.Test
+import           Language.Haskell.LSP.Types
+import           Language.Haskell.LSP.Types.Capabilities
+import           System.Clock
+import           System.Directory
+import           System.Environment.Blank                (setEnv)
+import           System.FilePath
+import           System.IO.Extra
+import           Test.Tasty
+import           Test.Tasty.ExpectedFailure
+import           Test.Tasty.HUnit
+import           Text.Printf
 
 main :: IO ()
 main = defaultMain $ testGroup "HIE"
@@ -46,6 +49,7 @@ main = defaultMain $ testGroup "HIE"
   , codeLensesTests
   , outlineTests
   , findDefinitionAndHoverTests
+  , hoverPerformanceTests
   , pluginTests
   , preprocessorTests
   , thTests
@@ -838,6 +842,50 @@ addSigLensesTests = let
       ]
     ]
 
+hoverPerformanceTests :: TestTree
+hoverPerformanceTests = testGroup "hover performance"
+  [ testSession "first hover" $ do
+      firstHoverDelay <- withTestSize 500 $ measureHover (Position 0 0)
+      let msg = "first hover delay should be less than 5 seconds: " <> showTimeSpec firstHoverDelay
+      liftIO $ assertBool msg (firstHoverDelay < fromNanoSecs (floor (5e9 :: Double)))
+
+  , testSession "delay grows sublinearly with span count" $ do
+      let sizes = [0,100 .. 1000]
+      tt  <- forM sizes $ \size -> withTestSize size $ \doc -> do
+              _ <- measureHover (Position 0 0) doc  -- discard first measurement
+              let worstCasePosition = Position size 50
+              measureHover worstCasePosition doc
+
+      let compute (t1,t2) (s1,s2) = fromIntegral (toNanoSecs t2 - toNanoSecs t1) / fromIntegral (s2-s1)
+          derivatives = zipWith compute (pairs tt) (pairs sizes)
+          isDecreasingSlope = all (uncurry (>)) . pairs
+          msg = "hover performance grows linearly or worse: " <> show (map showTimeSpec tt)
+
+      liftIO $ assertBool msg (isDecreasingSlope derivatives)
+  ]
+  where
+    withTestSize size action = do
+      let fp = "test/data/BenchHover.hs"
+      contents <- liftIO $ T.lines <$> readFileUtf8 fp
+
+      -- generate a module of given size
+      let lastLine = last contents
+          !contents' = T.unlines $ contents <> replicate size lastLine
+
+      doc <- openDoc' ("BenchHover-" <> show size <> ".hs") "haskell" contents'
+      _   <- waitForDiagnostics
+      res <- action doc
+      closeDoc doc
+      return res
+
+    measureHover pos doc = do
+      start <- liftIO $ getTime Monotonic
+      _     <- getHover doc pos
+      end   <- liftIO $ getTime Monotonic
+
+      let duration = diffTimeSpec end start
+      return duration
+
 findDefinitionAndHoverTests :: TestTree
 findDefinitionAndHoverTests = let
 
@@ -1300,9 +1348,11 @@ run s = withTempDir $ \dir -> do
   runSessionWithConfig conf cmd fullCaps { _window = Just $ WindowClientCapabilities $ Just True } dir s
   where
     conf = defaultConfig
+      -- If you uncomment this you can see the ghcide logger output
+      -- {logStdErr = True, logColor = False }
       -- If you uncomment this you can see all messages
       -- which can be quite useful for debugging.
-      -- { logMessages = True, logColor = False, logStdErr = True }
+      --{ logMessages = True, logColor = False }
 
 openTestDataDoc :: FilePath -> Session TextDocumentIdentifier
 openTestDataDoc path = do
@@ -1315,3 +1365,10 @@ unitTests = do
      [ testCase "empty file path" $
          uriToFilePath' (fromNormalizedUri $ filePathToUri' "") @?= Just ""
      ]
+
+showTimeSpec :: TimeSpec -> String
+showTimeSpec = printf "%0.6fs" . (/ (1e9::Double)) . realToFrac . toNanoSecs
+
+pairs :: [a] -> [(a,a)]
+pairs (x:y:rest) = (x,y) : pairs (y:rest)
+pairs _          = []
