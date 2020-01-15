@@ -846,6 +846,7 @@ type instance RuleResult GetModificationTime = FileVersion
 
 data FileVersion
     = VFSVersion Int
+    | WatchedFileVersion !Int
     | ModificationTime
       !Int   -- ^ Large unit (platform dependent, do not make assumptions)
       !Int   -- ^ Small unit (platform dependent, do not make assumptions)
@@ -856,6 +857,8 @@ instance NFData FileVersion
 vfsVersion :: FileVersion -> Maybe Int
 vfsVersion (VFSVersion i) = Just i
 vfsVersion ModificationTime{} = Nothing
+vfsVersion WatchedFileVersion{} = Nothing
+
 
 modificationTime :: FileVersion -> Maybe (Int, Int)
 modificationTime VFSVersion{} = Nothing
