@@ -43,6 +43,7 @@ module Development.IDE.Core.Shake(
     OnDiskRule(..),
     ) where
 
+import           Control.Concurrent.Async
 import           Development.Shake hiding (ShakeValue, doesFileExist)
 import           Development.Shake.Database
 import           Development.Shake.Classes
@@ -394,29 +395,28 @@ shakeRun IdeState{shakeExtras=ShakeExtras{..}, ..} acts =
         (\stop -> do
               (stopTime,_) <- duration stop
               logDebug logger $ T.pack $ "Starting shakeRun (aborting the previous one took " ++ showDuration stopTime ++ ")"
-              bar <- newBarrier
               start <- offsetTime
-              pure (start, bar))
+              pure start)
         -- It is crucial to be masked here, otherwise we can get killed
         -- between spawning the new thread and updating shakeAbort.
         -- See https://github.com/digital-asset/ghcide/issues/79
-        (\(start, bar) -> do
-              thread <- forkFinally (shakeRunDatabaseProfile shakeProfileDir shakeDb acts) $ \res -> do
+        (\start -> do
+              worker <- async (shakeRunDatabaseProfile shakeProfileDir shakeDb acts)
+              _workerCallback <- async $ do
+                  res <- waitCatch worker
                   runTime <- start
                   let res' = case res of
                           Left e -> "exception: " <> displayException e
                           Right _ -> "completed"
                       profile = case res of
-                          Right (_, Just fp) -> 
+                          Right (_, Just fp) ->
                               let link = case filePathToUri' $ toNormalizedFilePath fp of
                                             NormalizedUri x -> x
                               in ", profile saved at " <> T.unpack link
                           _ -> ""
                   logDebug logger $ T.pack $
                       "Finishing shakeRun (took " ++ showDuration runTime ++ ", " ++ res' ++ profile ++ ")"
-                  signalBarrier bar (fst <$> res)
-              -- important: we send an async exception to the thread, then wait for it to die, before continuing
-              pure (killThread thread >> void (waitBarrier bar), either throwIO return =<< waitBarrier bar))
+              pure (cancel worker, fst <$> wait worker))
 
 getDiagnostics :: IdeState -> IO [FileDiagnostic]
 getDiagnostics IdeState{shakeExtras = ShakeExtras{diagnostics}} = do
