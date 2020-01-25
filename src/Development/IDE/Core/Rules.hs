@@ -263,7 +263,7 @@ getSpanInfoRule =
     define $ \GetSpanInfo file -> do
         tc <- use_ TypeCheck file
         deps <- maybe (TransitiveDependencies [] []) fst <$> useWithStale GetDependencies file
-        tms <- mapMaybe (fmap fst) <$> usesWithStale TypeCheck (transitiveModuleDeps deps)
+        tms <- mapMaybe (fmap fst) <$> usesWithStale GetParsedModule (transitiveModuleDeps deps)
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
         x <- liftIO $ getSrcSpanInfos packageState fileImports tc tms
@@ -311,13 +311,13 @@ produceCompletions :: Rules ()
 produceCompletions =
     define $ \ProduceCompletions file -> do
         deps <- maybe (TransitiveDependencies [] []) fst <$> useWithStale GetDependencies file
-        tms <- mapMaybe (fmap fst) <$> usesWithStale TypeCheck (transitiveModuleDeps deps)
+        tms <- mapMaybe (fmap fst) <$> usesWithStale GetParsedModule (transitiveModuleDeps deps)
         tm <- fmap fst <$> useWithStale TypeCheck file
         packageState <- fmap (hscEnv . fst) <$> useWithStale GhcSession file
         case (tm, packageState) of
             (Just tm', Just packageState') -> do
                 cdata <- liftIO $ cacheDataProducer packageState' (hsc_dflags packageState')
-                                                    (tmrModule tm') (map tmrModule tms)
+                                                    (tmrModule tm') tms
                 return ([], Just (cdata, tm'))
             _ -> return ([], Nothing)
 
