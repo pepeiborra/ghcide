@@ -103,7 +103,7 @@ typecheckModule (IdeDefer defer) packageState deps pm =
     fmap (either (, Nothing) (second Just)) $
     runGhcEnv packageState $
         catchSrcErrors "typecheck" $ do
-            setupEnv deps
+            setupEnv [(tmrModSummary x, tmrModInfo x) | x <- deps]
             let modSummary = pm_mod_summary pm
                 dflags = ms_hspp_opts modSummary
             modSummary' <- initPlugins modSummary
@@ -128,14 +128,14 @@ initPlugins modSummary = do
 -- provide errors.
 compileModule
     :: HscEnv
-    -> [TcModuleResult]
+    -> [(ModSummary, HomeModInfo)]
     -> TcModuleResult
     -> IO (IdeResult (SafeHaskellMode, CgGuts, ModDetails))
 compileModule packageState deps tmr =
     fmap (either (, Nothing) (second Just)) $
     runGhcEnv packageState $
         catchSrcErrors "compile" $ do
-            setupEnv (deps ++ [tmr])
+            setupEnv (deps ++ [(tmrModSummary tmr, tmrModInfo tmr)])
 
             let tm = tmrModule tmr
             session <- getSession
@@ -149,12 +149,12 @@ compileModule packageState deps tmr =
             (guts, details) <- liftIO $ tidyProgram session desugar
             return (map snd warnings, (mg_safe_haskell desugar, guts, details))
 
-generateByteCode :: HscEnv -> [TcModuleResult] -> TcModuleResult -> CgGuts -> IO (IdeResult Linkable)
+generateByteCode :: HscEnv -> [(ModSummary, HomeModInfo)] -> TcModuleResult -> CgGuts -> IO (IdeResult Linkable)
 generateByteCode hscEnv deps tmr guts =
     fmap (either (, Nothing) (second Just)) $
     runGhcEnv hscEnv $
       catchSrcErrors "bytecode" $ do
-          setupEnv (deps ++ [tmr])
+          setupEnv (deps ++ [(tmrModSummary tmr, tmrModInfo tmr)])
           session <- getSession
           (warnings, (_, bytecode, sptEntries)) <- withWarnings "bytecode" $ \tweak ->
               liftIO $ hscInteractive session guts (tweak $ GHC.pm_mod_summary $ GHC.tm_parsed_module $ tmrModule tmr)
@@ -226,16 +226,16 @@ mkTcModuleResult tcm = do
 
 -- | Setup the environment that GHC needs according to our
 -- best understanding (!)
-setupEnv :: GhcMonad m => [TcModuleResult] -> m ()
+setupEnv :: GhcMonad m => [(ModSummary, HomeModInfo)] -> m ()
 setupEnv tmsIn = do
     -- if both a .hs-boot file and a .hs file appear here, we want to make sure that the .hs file
     -- takes precedence, so put the .hs-boot file earlier in the list
-    let isSourceFile = (==HsBootFile) . ms_hsc_src . pm_mod_summary . tm_parsed_module . tmrModule
-        tms = sortBy (compare `on` Down . isSourceFile) tmsIn
+    let isSourceFile = (==HsBootFile) . ms_hsc_src
+        tms = sortBy (compare `on` Down . isSourceFile . fst) tmsIn
 
     session <- getSession
 
-    let mss = map tmrModSummary tms
+    let mss = map fst tms
 
     -- set the target and module graph in the session
     let graph = mkModuleGraph mss
@@ -256,7 +256,7 @@ setupEnv tmsIn = do
     modifySession $ \s -> s { hsc_FC = newFinderCacheVar }
 
     -- load dependent modules, which must be in topological order.
-    mapM_ loadModuleHome tms
+    mapM_ (uncurry loadModuleHome) tms
 
 
 -- | Load a module, quickly. Input doesn't need to be desugared.
@@ -265,13 +265,12 @@ setupEnv tmsIn = do
 -- modifies the session.
 loadModuleHome
     :: (GhcMonad m)
-    => TcModuleResult
+    => ModSummary
+    -> HomeModInfo
     -> m ()
-loadModuleHome tmr = modifySession $ \e ->
+loadModuleHome ms mod_info = modifySession $ \e ->
     e { hsc_HPT = addToHpt (hsc_HPT e) mod mod_info }
   where
-    ms       = pm_mod_summary . tm_parsed_module . tmrModule $ tmr
-    mod_info = tmrModInfo tmr
     mod      = ms_mod_name ms
 
 
