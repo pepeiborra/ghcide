@@ -12,6 +12,7 @@ module Development.IDE.GHC.Compat(
     mkHieFile,
     writeHieFile,
     readHieFile,
+    supportsHieFiles,
 #if !MIN_GHC_API_VERSION(8,8,0)
     ml_hie_file,
 #endif
@@ -43,6 +44,10 @@ import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, Mo
 import HieAst
 import HieBin
 import HieTypes
+
+supportsHieFiles :: Bool
+supportsHieFiles = True
+
 #else
 import GhcPlugins hiding (ModLocation)
 import NameCache
@@ -73,6 +78,9 @@ ml_hie_file _ = ""
 
 data HieFile = HieFile {hie_module :: (), hie_exports :: [AvailInfo]}
 data HieFileResult = HieFileResult { hie_file_result :: HieFile }
+
+supportsHieFiles :: Bool
+supportsHieFiles = False
 #endif
 
 #if !MIN_GHC_API_VERSION(8,6,0)
