@@ -26,7 +26,8 @@ module Development.IDE.GHC.Compat(
     GHC.ModLocation,
     pattern ModLocation,
 
-    module GHC
+    module GHC,
+    supportsHieFiles
     ) where
 
 import StringBuffer
@@ -40,6 +41,10 @@ import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, Mo
 import HieAst
 import HieBin
 import HieTypes
+
+supportsHieFiles :: Bool
+supportsHieFiles = True
+
 #else
 import GhcPlugins hiding (ModLocation)
 import NameCache
@@ -67,6 +72,9 @@ readHieFile _ _ = return (HieFileResult (HieFile () []), ())
 
 data HieFile = HieFile {hie_module :: (), hie_exports :: [AvailInfo]}
 data HieFileResult = HieFileResult { hie_file_result :: HieFile }
+
+supportsHieFiles :: Bool
+supportsHieFiles = False
 #endif
 
 #if !MIN_GHC_API_VERSION(8,6,0)

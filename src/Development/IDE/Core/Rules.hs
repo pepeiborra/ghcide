@@ -33,6 +33,7 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Development.IDE.Core.Compile
+import Development.IDE.Core.OfInterest
 import Development.IDE.Types.Options
 import Development.IDE.Spans.Calculate
 import Development.IDE.Import.DependencyInformation
@@ -50,11 +51,13 @@ import           Data.Foldable
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List
+import Data.Ord
 import qualified Data.Set                                 as Set
 import qualified Data.Text                                as T
 import           Development.IDE.GHC.Error
 import           Development.Shake                        hiding (Diagnostic)
 import Development.IDE.Core.RuleTypes
+import Development.IDE.Types.Logger (logDebug)
 import Development.IDE.Spans.Type
 
 import qualified GHC.LanguageExtensions as LangExt
@@ -267,10 +270,13 @@ getSpanInfoRule =
     define $ \GetSpanInfo file -> do
         tc <- use_ TypeCheck file
         deps <- maybe (TransitiveDependencies [] [] []) fst <$> useWithStale GetDependencies file
-        tms <- mapMaybe (fmap fst) <$> usesWithStale GetParsedModule (transitiveModuleDeps deps)
+        let tdeps = transitiveModuleDeps deps
+        pms <- uses_ GetParsedModule tdeps
+        ifaces <- uses_ GetModIface tdeps
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
-        x <- liftIO $ getSrcSpanInfos packageState (fmap (second (fmap modLocationToNormalizedFilePath)) fileImports) tc tms
+        let imports = second (fmap modLocationToNormalizedFilePath) <$> fileImports
+        x <- liftIO $ getSrcSpanInfos packageState imports tc (zip pms $ map hirModIface ifaces)
         return ([], Just x)
 
 -- Typechecks a module.
@@ -354,6 +360,74 @@ getHieFileRule =
         let nameCache = initNameCache u []
         liftIO $ fmap (hie_file_result . fst) $ readHieFile nameCache f
 
+getHiFileRule :: Rules ()
+getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
+  session <- hscEnv <$> use_ GhcSession f
+  logger  <- actionLogger
+  -- get all dependencies interface files, to check for freshness
+  (deps,_)<- use_ GetLocatedImports f
+  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
+
+  -- TODO find the hi file without relying on the parsed module
+  --      it should be possible to construct a ModSummary parsing just the imports
+  --      (see HeaderInfo in the GHC package)
+  pm      <- use_ GetParsedModule f
+  let hiFile = ml_hi_file $ ms_location ms
+      ms     = pm_mod_summary pm
+
+  case sequence depHis of
+    Nothing -> do
+          liftIO $ logDebug logger $ T.pack ("Missing dependencies for interface file: " <> hiFile)
+          pure (Nothing, ([], Nothing))
+    Just deps -> do
+      gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
+      if not gotHiFile
+        then do
+          liftIO $ logDebug logger $ T.pack ("Missing interface file: " <> hiFile)
+          pure (Nothing, ([], Nothing))
+        else do
+          hiVersion  <- use_ GetModificationTime $ toNormalizedFilePath hiFile
+          modVersion <- use_ GetModificationTime f
+          let sourceModified = LT == comparing modificationTime hiVersion modVersion
+          if sourceModified
+            then do
+              liftIO $ logDebug logger $ T.pack ("Stale interface file: " <> hiFile)
+              pure (Nothing, ([], Nothing))
+            else do
+              r <- liftIO $ loadInterface session ms deps
+              case r of
+                Right iface -> do
+                  let result = HiFileResult ms iface
+                  liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
+                  return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
+                Left err -> do
+                  let d = ideErrorText f errMsg
+                      errMsg = T.pack err
+                  liftIO
+                    $  logDebug logger
+                    $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
+                    <> errMsg
+                  return (Nothing, ([d], Nothing))
+
+getModIfaceRule :: Rules ()
+getModIfaceRule = define $ \GetModIface f -> do
+    -- FIXME this dependency causes unnecessary reloading
+    filesOfInterest <- getFilesOfInterest
+    let useHiFile =
+          -- Interface files do not carry location information, so
+          -- never use interface files if .hie files are not available
+          supportsHieFiles &&
+          -- Never load interface files for files of interest
+          f `notElem` filesOfInterest
+    mbHiFile <- if useHiFile then use GetHiFile f else return Nothing
+    case mbHiFile of
+        Just x ->
+            return ([], Just x)
+        Nothing -> do
+            tmr <- use_ TypeCheck f
+            let iface = hm_iface (tmrModInfo tmr)
+            return ([], Just $ HiFileResult (tmrModSummary tmr) iface)
+
 -- | A rule that wires per-file rules together
 mainRule :: Rules ()
 mainRule = do
@@ -368,3 +442,5 @@ mainRule = do
     generateByteCodeRule
     loadGhcSession
     getHieFileRule
+    getHiFileRule
+    getModIfaceRule
