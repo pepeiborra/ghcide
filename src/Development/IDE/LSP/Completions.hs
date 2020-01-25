@@ -15,6 +15,7 @@ import Development.IDE.Core.PositionMapping
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Shake
 import Development.IDE.LSP.Server
+import GHC (tm_parsed_module)
 
 -- | Generate code actions.
 getCompletionsLSP
@@ -40,7 +41,7 @@ getCompletionsLSP lsp ide
                 -> return (Completions $ List [])
               (Just pfix', _) -> do
                 let fakeClientCapabilities = ClientCapabilities Nothing Nothing Nothing Nothing
-                Completions . List <$> getCompletions ideOpts cci' (tmrModule tm') pfix' fakeClientCapabilities (WithSnippets True)
+                Completions . List <$> getCompletions ideOpts cci' (tm_parsed_module $ tmrModule tm') pfix' fakeClientCapabilities (WithSnippets True)
               _ -> return (Completions $ List [])
           _ -> return (Completions $ List [])
       _ -> return (Completions $ List [])
