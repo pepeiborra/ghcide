@@ -20,6 +20,7 @@ import           DataCon
 import           Desugar
 import           GHC
 import           GhcMonad
+import           HscTypes
 import           FastString (mkFastString)
 import           OccName
 import           Development.IDE.Types.Location
@@ -51,7 +52,7 @@ getSrcSpanInfos
     :: HscEnv
     -> [(Located ModuleName, Maybe NormalizedFilePath)]
     -> TcModuleResult
-    -> [ParsedModule]
+    -> [(ParsedModule, ModIface)]
     -> IO SpansInfo
 getSrcSpanInfos env imports tc tms =
     runGhcEnv env $
@@ -61,16 +62,22 @@ getSrcSpanInfos env imports tc tms =
 getSpanInfo :: GhcMonad m
             => [(Located ModuleName, Maybe NormalizedFilePath)] -- ^ imports
             -> TypecheckedModule
-            -> [ParsedModule]
+            -> [(ParsedModule, ModIface)]
             -> m SpansInfo
-getSpanInfo mods tcm tcms =
-  do let tcs = tm_typechecked_source tcm
+getSpanInfo mods tcm@TypecheckedModule{..} deps =
+  do let tcs = tm_typechecked_source
          bs  = listifyAllSpans  tcs :: [LHsBind GhcTc]
          es  = listifyAllSpans  tcs :: [LHsExpr GhcTc]
          ps  = listifyAllSpans' tcs :: [Pat GhcTc]
-         ts  = listifyAllSpans $ tm_renamed_source tcm :: [LHsType GhcRn]
-         allModules = tm_parsed_module tcm : tcms
-         funBinds = funBindMap $ tm_parsed_module tcm
+         ts  = listifyAllSpans tm_renamed_source :: [LHsType GhcRn]
+         allModules = tm_parsed_module : map fst deps
+         funBinds = funBindMap tm_parsed_module
+
+     -- Load all modules in HPT to make their interface documentation available
+     mapM_ ((`loadDepModule` Nothing) . snd) deps
+     forM_ (modInfoIface tm_checked_module_info) $ \modIface ->
+       modifySession (loadModuleHome $ HomeModInfo modIface (snd tm_internals_) Nothing)
+
      bts <- mapM (getTypeLHsBind allModules funBinds) bs   -- binds
      ets <- mapM (getTypeLHsExpr allModules) es -- expressions
      pts <- mapM (getTypeLPat allModules)    ps -- patterns

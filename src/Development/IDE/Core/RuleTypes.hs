@@ -58,6 +58,20 @@ instance Show TcModuleResult where
 instance NFData TcModuleResult where
     rnf = rwhnf
 
+tmrModSummary :: TcModuleResult -> ModSummary
+tmrModSummary = pm_mod_summary . tm_parsed_module . tmrModule
+
+data HiFileResult = HiFileResult
+    { hirModSummary :: ModSummary
+    , hirModIface :: ModIface
+    }
+
+instance NFData HiFileResult where
+    rnf = rwhnf
+
+instance Show HiFileResult where
+    show = show . hirModSummary
+
 -- | The type checked version of this file, requires TypeCheck+
 type instance RuleResult TypeCheck = TcModuleResult
 
@@ -85,6 +99,11 @@ type instance RuleResult ReportImportCycles = ()
 -- | Read the given HIE file.
 type instance RuleResult GetHieFile = HieFile
 
+-- | Read the module interface file
+type instance RuleResult GetHiFile = HiFileResult
+
+-- | Get a module interface, either from an interface file or a typechecked module
+type instance RuleResult GetModIface = HiFileResult
 
 data GetParsedModule = GetParsedModule
     deriving (Eq, Show, Typeable, Generic)
@@ -153,3 +172,15 @@ data GetHieFile = GetHieFile FilePath
 instance Hashable GetHieFile
 instance NFData   GetHieFile
 instance Binary   GetHieFile
+
+data GetHiFile = GetHiFile
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetHiFile
+instance NFData   GetHiFile
+instance Binary   GetHiFile
+
+data GetModIface = GetModIface
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetModIface
+instance NFData   GetModIface
+instance Binary   GetModIface
