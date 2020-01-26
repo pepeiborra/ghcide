@@ -33,6 +33,7 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Development.IDE.Core.Compile
+import Development.IDE.Core.OfInterest
 import Development.IDE.Types.Options
 import Development.IDE.Spans.Calculate
 import Development.IDE.Import.DependencyInformation
@@ -406,13 +407,14 @@ getHiFileRule = define $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
   logger  <- actionLogger
   pm      <- use_ GetParsedModule f
+  filesOfInterest <- getFilesOfInterest
   -- TODO find the hi file without relying on the parsed module
   --      it should be possible to construct a ModSummary parsing just the imports
   --      (see HeaderInfo in the GHC package)
   let hiFile = ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
   gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
-  if not gotHiFile
+  if not gotHiFile || f `elem` filesOfInterest
     then do
       liftIO $ logDebug logger $ T.pack ("Missing interface file for" <> hiFile)
       pure ([], Nothing)
