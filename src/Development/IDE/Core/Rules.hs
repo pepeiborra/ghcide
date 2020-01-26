@@ -120,8 +120,34 @@ getDefinition file pos = fmap join $ runMaybeT $ do
     opts <- lift getIdeOptions
     spans <- useE GetSpanInfo file
     pkgState <- hscEnv <$> useE GhcSession file
-    let getHieFile x = useNoFile (GetHieFile x)
-    lift $ AtPoint.gotoDefinition getHieFile opts pkgState (spansExprs spans) pos
+    lift $ AtPoint.gotoDefinition (getHieFile opts file) opts pkgState (spansExprs spans) pos
+
+getHieFile
+  :: IdeOptions
+  -> NormalizedFilePath
+  -> Module
+  -> Action (Maybe (HieFile, FilePath))
+getHieFile IdeOptions {..} file mod = do
+  (deps, _) <- use_ GetLocatedImports file
+  pkgState  <- hscEnv <$> use_ GhcSession file
+  paths     <- case find (\(L _ x, _) -> x == moduleName mod) deps of
+    Just (_, Just (ArtifactsLocation ml)) ->
+      return $ liftM2 (,) (ml_hie_file ml) (ml_hs_file ml)
+    _ -> do
+      let unitId = moduleUnitId mod
+      case lookupPackageConfig unitId pkgState of
+        Just pkgConfig -> do
+          hieFile <- liftIO $ optLocateHieFile optPkgLocationOpts pkgConfig mod
+          path    <- liftIO $ optLocateSrcFile optPkgLocationOpts pkgConfig mod
+          return $ liftM2 (,) hieFile path
+        _ -> return Nothing
+  case paths of
+    Nothing                 -> return Nothing
+    Just (hiePath, modPath) -> do
+      hieFile <- useNoFile (GetHieFile hiePath)
+      return $ (, modPath) <$> hieFile
+
+
 
 -- | Parse the contents of a daml file.
 getParsedModule :: NormalizedFilePath -> Action (Maybe ParsedModule)

@@ -25,6 +25,7 @@ module Development.IDE.GHC.Compat(
     pattern IEThingWith,
     GHC.ModLocation,
     pattern ModLocation,
+    ml_hie_file,
 
     module GHC
     ) where
@@ -34,7 +35,7 @@ import DynFlags
 import FieldLabel
 
 import qualified GHC
-import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
+import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation, ml_hie_file)
 
 #if MIN_GHC_API_VERSION(8,8,0)
 import HieAst
@@ -146,4 +147,12 @@ pattern ModLocation a b c <-
     GHC.ModLocation a b c _ where ModLocation a b c = GHC.ModLocation a b c ""
 #else
     GHC.ModLocation a b c where ModLocation a b c = GHC.ModLocation a b c
+#endif
+
+ml_hie_file :: GHC.ModLocation -> Maybe FilePath
+ml_hie_file =
+#if MIN_GHC_API_VERSION(8,8,0)
+    Just . GHC.ml_hie_file
+#else
+    const Nothing
 #endif
