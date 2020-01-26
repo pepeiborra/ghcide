@@ -90,6 +90,11 @@ type instance RuleResult GetHieFile = HieFile
 -- | Produce completions info for a file
 type instance RuleResult ProduceCompletions = (CachedCompletions, TcModuleResult)
 
+-- | Read the module interface file
+type instance RuleResult GetHiFile = ModIface
+
+-- | Get a module interface, either from an interface file or a typechecked module
+type instance RuleResult GetModIface = ModIface
 
 data GetParsedModule = GetParsedModule
     deriving (Eq, Show, Typeable, Generic)
@@ -164,3 +169,15 @@ data ProduceCompletions = ProduceCompletions
 instance Hashable ProduceCompletions
 instance NFData   ProduceCompletions
 instance Binary   ProduceCompletions
+
+data GetHiFile = GetHiFile
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetHiFile
+instance NFData   GetHiFile
+instance Binary   GetHiFile
+
+data GetModIface = GetModIface
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetModIface
+instance NFData   GetModIface
+instance Binary   GetModIface
