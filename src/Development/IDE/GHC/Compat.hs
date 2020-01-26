@@ -16,6 +16,8 @@ module Development.IDE.GHC.Compat(
 #if !MIN_GHC_API_VERSION(8,8,0)
     ml_hie_file,
 #endif
+    setDefaultHieDir,
+    dontWriteHieFiles,
     hPutStringBuffer,
     includePathsGlobal,
     includePathsQuote,
@@ -163,4 +165,20 @@ pattern ModLocation a b c <-
     GHC.ModLocation a b c _ where ModLocation a b c = GHC.ModLocation a b c ""
 #else
     GHC.ModLocation a b c where ModLocation a b c = GHC.ModLocation a b c
+#endif
+
+setDefaultHieDir :: FilePath -> DynFlags -> DynFlags
+setDefaultHieDir _f d =
+#if MIN_GHC_API_VERSION(8,8,0)
+    d { hieDir     = hieDir d `mappend` Just _f}
+#else
+    d
+#endif
+
+dontWriteHieFiles :: DynFlags -> DynFlags
+dontWriteHieFiles d =
+#if MIN_GHC_API_VERSION(8,8,0)
+    gopt_unset d Opt_WriteHie
+#else
+    d
 #endif
