@@ -24,6 +24,8 @@ module Development.IDE.GHC.Util(
     -- * General utilities
     readFileUtf8,
     hDuplicateTo',
+    setDefaultHieDir,
+    dontWriteHieFiles
     ) where
 
 import Config
@@ -34,7 +36,6 @@ import Data.Maybe
 import Data.Typeable
 import qualified Data.ByteString.Internal as BS
 import Fingerprint
-import GHC
 import GhcMonad
 import GhcPlugins hiding (Unique)
 import Data.IORef
@@ -59,6 +60,7 @@ import qualified Data.ByteString          as BS
 import StringBuffer
 import System.FilePath
 
+import Development.IDE.GHC.Compat as GHC
 import Development.IDE.Types.Location
 
 

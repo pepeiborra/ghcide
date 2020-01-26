@@ -14,6 +14,9 @@ import Control.Concurrent.Extra
 import Control.Exception
 import Control.Monad.Extra
 import Control.Monad.IO.Class
+import qualified Crypto.Hash.SHA1 as H
+import qualified Data.ByteString.Char8 as B
+import Data.ByteString.Base16
 import Data.Default
 import System.Time.Extra
 import Development.IDE.Core.FileStore
@@ -50,12 +53,25 @@ import qualified Data.Map.Strict as Map
 
 import GHC hiding (def)
 import qualified GHC.Paths
+import           DynFlags
 
+import HIE.Bios.Environment
 import HIE.Bios
+
+-- Prefix for the cache path
+cacheDir :: String
+cacheDir = "ghcide"
 
 -- Set the GHC libdir to the nix libdir if it's present.
 getLibdir :: IO FilePath
 getLibdir = fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"
+
+getCacheDir :: [String] -> IO FilePath
+getCacheDir opts = getXdgDirectory XdgCache (cacheDir </> opts_hash)
+    where
+        -- Create a unique folder per set of different GHC options, assuming that each different set of
+        -- GHC options will create incompatible interface files.
+        opts_hash = B.unpack $ encode $ H.finalize $ H.updates H.init (map B.pack opts)
 
 ghcideVersion :: IO String
 ghcideVersion = do
@@ -178,19 +194,44 @@ showEvent lock e = withLock lock $ print e
 cradleToSession :: Cradle -> IO HscEnvEq
 cradleToSession cradle = do
     cradleRes <- getCompilerOptions "" cradle
-    opts <- case cradleRes of
+    ComponentOptions opts _deps <- case cradleRes of
         CradleSuccess r -> pure r
         CradleFail err -> throwIO err
         -- TODO Rather than failing here, we should ignore any files that use this cradle.
         -- That will require some more changes.
         CradleNone -> fail "'none' cradle is not yet supported"
     libdir <- getLibdir
+
+    cacheDir <- getCacheDir opts
+
     env <- runGhc (Just libdir) $ do
-        _targets <- initSession opts
+        dflags <- getSessionDynFlags
+        (dflags', _targets) <- addCmdOpts opts dflags
+        _ <- setSessionDynFlags $
+             -- disabled, generated directly by ghcide instead
+             flip gopt_unset Opt_WriteInterface $
+             -- disabled, generated directly by ghcide instead
+             -- also, it can confuse the interface stale check
+             dontWriteHieFiles $
+             setHiDir cacheDir $
+             setDefaultHieDir cacheDir $
+             setIgnoreInterfacePragmas $
+             disableOptimisation dflags'
         getSession
     initDynLinker env
     newHscEnvEq env
 
+setIgnoreInterfacePragmas :: DynFlags -> DynFlags
+setIgnoreInterfacePragmas df =
+    gopt_set (gopt_set df Opt_IgnoreInterfacePragmas) Opt_IgnoreOptimChanges
+
+disableOptimisation :: DynFlags -> DynFlags
+disableOptimisation df = updOptLevel 0 df
+
+setHiDir :: FilePath -> DynFlags -> DynFlags
+setHiDir f d =
+    -- override user settings to avoid conflicts leading to recompilation
+    d { hiDir      = Just f}
 
 loadSession :: FilePath -> IO (FilePath -> Action HscEnvEq)
 loadSession dir = do
