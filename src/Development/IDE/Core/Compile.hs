@@ -98,14 +98,12 @@ computePackageDeps env pkg = do
             T.pack $ "unknown package: " ++ show pkg]
         Just pkgInfo -> return $ Right $ depends pkgInfo
 
--- TODO Share code with typecheckModule. The environment needs to be setup
--- slightly differently but we can probably factor out shared code here.
 ondiskTypeCheck :: IdeDefer
                 -> HscEnv
                 -> [(HomeModInfo, ModSummary)]
                 -> ParsedModule
                 -> IO ([FileDiagnostic], Maybe TcModuleResult)
-ondiskTypeCheck (IdeDefer defer) hsc deps pm = do
+ondiskTypeCheck defer hsc deps pm = do
     fmap (either (, Nothing) (second Just)) $
       runGhcEnv hsc $
       catchSrcErrors "typecheck" $ do
@@ -128,18 +126,7 @@ ondiskTypeCheck (IdeDefer defer) hsc deps pm = do
         -- Long-term we might just want to change the order returned by GetDependencies
         -- FIXME is this reverse still correct
         mapM_ loadDepModule (reverse $ map fst deps)
-        modSummary' <- initPlugins $ pm_mod_summary pm
-        (warnings, tcm) <- withWarnings "typecheck" $ \tweak ->
-            GHC.typecheckModule $
-              enableTopLevelWarnings $
-                demoteIfDefer $
-                    pm { pm_mod_summary = tweak modSummary' }
-        tcm <- mkTcModuleResult tcm
-        let errorPipeline = unDefer . hideDiag dflags
-            dflags = ms_hspp_opts modSummary'
-        return (map errorPipeline warnings, tcm)
-    where
-        demoteIfDefer = if defer then demoteTypeErrorsToWarnings else id
+        typeCheckActual defer pm
 
 loadDepModule :: GhcMonad m => HomeModInfo -> m ()
 loadDepModule HomeModInfo{hm_iface} = do
@@ -160,13 +147,15 @@ typecheckModule
     -> [TcModuleResult]
     -> ParsedModule
     -> IO (IdeResult TcModuleResult)
-typecheckModule (IdeDefer defer) packageState deps pm =
-    let demoteIfDefer = if defer then demoteTypeErrorsToWarnings else id
-    in
+typecheckModule defer packageState deps pm =
     fmap (either (, Nothing) (second Just)) $
     runGhcEnv packageState $
         catchSrcErrors "typecheck" $ do
             setupEnv [(tmrModSummary x, tmrModInfo x) | x <- deps]
+            typeCheckActual defer pm
+
+typeCheckActual :: GhcMonad m => IdeDefer -> ParsedModule -> m ([FileDiagnostic], TcModuleResult)
+typeCheckActual (IdeDefer defer) pm = do
             let modSummary = pm_mod_summary pm
                 dflags = ms_hspp_opts modSummary
             modSummary' <- initPlugins modSummary
@@ -176,6 +165,8 @@ typecheckModule (IdeDefer defer) packageState deps pm =
             tcm2 <- mkTcModuleResult tcm
             let errorPipeline = unDefer . hideDiag dflags
             return (map errorPipeline warnings, tcm2)
+    where
+        demoteIfDefer = if defer then demoteTypeErrorsToWarnings else id
 
 initPlugins :: GhcMonad m => ModSummary -> m ModSummary
 initPlugins modSummary = do
