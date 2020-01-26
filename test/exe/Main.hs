@@ -228,7 +228,7 @@ diagnosticTests = testGroup "diagnostics"
       let change = TextDocumentContentChangeEvent
             { _range = Just (Range (Position 0 0) (Position 0 20))
             , _rangeLength = Nothing
-            , _text = ""
+            , _text = "module ModuleC where"
             }
       changeDoc docA [change]
       expectDiagnostics [("ModuleB.hs", [(DsError, (1, 0), "Could not find module")])]
@@ -896,7 +896,9 @@ insertNewDefinitionTests :: TestTree
 insertNewDefinitionTests = testGroup "insert new definition actions"
   [ testSession "insert new function definition" $ do
       let txtB =
-            ["foo True = select [True]"
+            ["module M where"
+            ,"foo :: Bool -> Bool"
+            ,"foo True = select [True]"
             , ""
             ,"foo False = False"
             ]
@@ -908,7 +910,7 @@ insertNewDefinitionTests = testGroup "insert new definition actions"
       _ <- waitForDiagnostics
       CACodeAction action@CodeAction { _title = actionTitle } : _
                   <- sortOn (\(CACodeAction CodeAction{_title=x}) -> x) <$>
-                     getCodeActions docB (R 1 0 1 50)
+                     getCodeActions docB (R 0 0 2 50)
       liftIO $ actionTitle @?= "Define select :: [Bool] -> Bool"
       executeCodeAction action
       contentAfterAction <- documentContents docB
@@ -920,7 +922,8 @@ insertNewDefinitionTests = testGroup "insert new definition actions"
         ++ txtB')
   , testSession "define a hole" $ do
       let txtB =
-            ["foo True = _select [True]"
+            ["module M where"
+            ,"foo True = _select [True]"
             , ""
             ,"foo False = False"
             ]
@@ -932,12 +935,13 @@ insertNewDefinitionTests = testGroup "insert new definition actions"
       _ <- waitForDiagnostics
       CACodeAction action@CodeAction { _title = actionTitle } : _
                   <- sortOn (\(CACodeAction CodeAction{_title=x}) -> x) <$>
-                     getCodeActions docB (R 1 0 1 50)
+                     getCodeActions docB (R 0 0 2 50)
       liftIO $ actionTitle @?= "Define select :: [Bool] -> Bool"
       executeCodeAction action
       contentAfterAction <- documentContents docB
       liftIO $ contentAfterAction @?= T.unlines (
-        ["foo True = select [True]"
+        ["module M where"
+        ,"foo True = select [True]"
         , ""
         ,"foo False = False"
         , ""
@@ -1507,7 +1511,7 @@ completionTests
 outlineTests :: TestTree
 outlineTests = testGroup
   "outline"
-  [ testSessionWait "type class" $ do
+  [ testSession "type class" $ do
     let source = T.unlines ["module A where", "class A a where a :: a -> Bool"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
@@ -1520,7 +1524,7 @@ outlineTests = testGroup
                         [docSymbol' "a" SkMethod (R 1 16 1 30) (R 1 16 1 17)]
           ]
       ]
-  , testSessionWait "type class instance " $ do
+  , testSession "type class instance " $ do
     let source = T.unlines ["class A a where", "instance A () where"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
@@ -1528,12 +1532,12 @@ outlineTests = testGroup
       [ classSymbol "A a" (R 0 0 0 15) []
       , docSymbol "A ()" SkInterface (R 1 0 1 19)
       ]
-  , testSessionWait "type family" $ do
+  , testSession "type family" $ do
     let source = T.unlines ["{-# language TypeFamilies #-}", "type family A"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left [docSymbolD "A" "type family" SkClass (R 1 0 1 13)]
-  , testSessionWait "type family instance " $ do
+  , testSession "type family instance " $ do
     let source = T.unlines
           [ "{-# language TypeFamilies #-}"
           , "type family A a"
@@ -1545,12 +1549,12 @@ outlineTests = testGroup
       [ docSymbolD "A a"   "type family" SkClass     (R 1 0 1 15)
       , docSymbol "A ()" SkInterface (R 2 0 2 23)
       ]
-  , testSessionWait "data family" $ do
+  , testSession "data family" $ do
     let source = T.unlines ["{-# language TypeFamilies #-}", "data family A"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left [docSymbolD "A" "data family" SkClass (R 1 0 1 11)]
-  , testSessionWait "data family instance " $ do
+  , testSession "data family instance " $ do
     let source = T.unlines
           [ "{-# language TypeFamilies #-}"
           , "data family A a"
@@ -1562,36 +1566,36 @@ outlineTests = testGroup
       [ docSymbolD "A a"   "data family" SkClass     (R 1 0 1 11)
       , docSymbol "A ()" SkInterface (R 2 0 2 25)
       ]
-  , testSessionWait "constant" $ do
+  , testSession "constant" $ do
     let source = T.unlines ["a = ()"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left
       [docSymbol "a" SkFunction (R 0 0 0 6)]
-  , testSessionWait "pattern" $ do
+  , testSession "pattern" $ do
     let source = T.unlines ["Just foo = Just 21"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left
       [docSymbol "Just foo" SkFunction (R 0 0 0 18)]
-  , testSessionWait "pattern with type signature" $ do
+  , testSession "pattern with type signature" $ do
     let source = T.unlines ["{-# language ScopedTypeVariables #-}", "a :: () = ()"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left
       [docSymbol "a :: ()" SkFunction (R 1 0 1 12)]
-  , testSessionWait "function" $ do
+  , testSession "function" $ do
     let source = T.unlines ["a x = ()"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left [docSymbol "a" SkFunction (R 0 0 0 8)]
-  , testSessionWait "type synonym" $ do
+  , testSession "type synonym" $ do
     let source = T.unlines ["type A = Bool"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left
       [docSymbol' "A" SkTypeParameter (R 0 0 0 13) (R 0 5 0 6)]
-  , testSessionWait "datatype" $ do
+  , testSession "datatype" $ do
     let source = T.unlines ["data A = C"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
@@ -1601,13 +1605,13 @@ outlineTests = testGroup
                               (R 0 0 0 10)
                               [docSymbol "C" SkConstructor (R 0 9 0 10)]
       ]
-  , testSessionWait "import" $ do
+  , testSession "import" $ do
     let source = T.unlines ["import Data.Maybe"]
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left
       [docSymbol "import Data.Maybe" SkModule (R 0 0 0 17)]
-  , testSessionWait "foreign import" $ do
+  , testSession "foreign import" $ do
     let source = T.unlines
           [ "{-# language ForeignFunctionInterface #-}"
           , "foreign import ccall \"a\" a :: Int"
@@ -1615,7 +1619,7 @@ outlineTests = testGroup
     docId   <- openDoc' "A.hs" "haskell" source
     symbols <- getDocumentSymbols docId
     liftIO $ symbols @?= Left [docSymbolD "a" "import" SkObject (R 1 0 1 33)]
-  , testSessionWait "foreign export" $ do
+  , testSession "foreign export" $ do
     let source = T.unlines
           [ "{-# language ForeignFunctionInterface #-}"
           , "foreign export ccall odd :: Int -> Bool"
