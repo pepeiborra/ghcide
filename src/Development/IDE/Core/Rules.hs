@@ -65,11 +65,8 @@ import NameCache
 import HscTypes
 import DynFlags (xopt)
 import GHC.Generics(Generic)
-import qualified Maybes
-import LoadIface
 import TcRnMonad (initIfaceLoad)
 import TcIface (typecheckIface)
-import Outputable (showSDoc)
 
 import qualified Development.IDE.Spans.AtPoint as AtPoint
 import Development.IDE.Core.Service
@@ -409,26 +406,24 @@ getHiFileRule = define $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
   logger  <- actionLogger
   pm      <- use_ GetParsedModule f
-  let mod    = ms_mod $ pm_mod_summary pm
   -- TODO find the hi file without relying on the parsed module
-  let hiFile = ml_hi_file $ ms_location $ pm_mod_summary pm
+  --      it should be possible to construct a ModSummary parsing just the imports
+  --      (see HeaderInfo in the GHC package)
+  let hiFile = ml_hi_file $ ms_location ms
+      ms     = pm_mod_summary pm
   gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
   if not gotHiFile
     then do
-        liftIO
-            $  logDebug logger
-            $  T.pack ("Missing interface file for" <> hiFile)
-        pure ([], Nothing)
+      liftIO $ logDebug logger $ T.pack ("Missing interface file for" <> hiFile)
+      pure ([], Nothing)
     else do
-      r <- liftIO $ initIfaceLoad session $ readIface mod hiFile
+      r <- liftIO $ loadInterface session hiFile (ms_mod ms)
       case r of
-        Maybes.Succeeded iface -> do
-            -- TODO it should be possible to construct a ModSummary from a ModIface
-          let modSummary = pm_mod_summary pm
-              result     = HiFileResult modSummary iface
+        Right iface -> do
+          let result = HiFileResult ms iface
           liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
           return ([], Just result)
-        Maybes.Failed err -> do
+        Left err -> do
           let d = Diagnostic { _range              = noRange
                              , _severity           = Nothing
                              , _code               = Nothing
@@ -436,13 +431,11 @@ getHiFileRule = define $ \GetHiFile f -> do
                              , _message            = errMsg
                              , _relatedInformation = Nothing
                              }
-              errMsg = T.pack $ showSDoc (hsc_dflags session) err
-
+              errMsg = T.pack err
           liftIO
             $  logDebug logger
             $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
             <> errMsg
-
           return ([(f, ShowDiag, d)], Nothing)
 
 getModIfaceRule :: Rules ()

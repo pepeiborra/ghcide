@@ -17,6 +17,7 @@ module Development.IDE.Core.Compile
   , addRelativeImport
   , mkTcModuleResult
   , generateByteCode
+  , loadInterface
   ) where
 
 import Development.IDE.Core.RuleTypes
@@ -50,6 +51,8 @@ import           GhcMonad
 import           GhcPlugins                     as GHC hiding (fst3, (<>))
 import qualified HeaderInfo                     as Hdr
 import           HscMain                        (hscInteractive)
+import           LoadIface                      (readIface)
+import qualified Maybes
 import           MkIface
 import           StringBuffer                   as SB
 import           TidyPgm
@@ -446,3 +449,19 @@ parseFileContents customPreprocessor dflags filename contents = do
                       }
                    warnings = diagFromErrMsgs "parser" dflags warns
                pure (warnings ++ preproc_warnings, pm)
+
+-- | Retuns an up-to-date module interface if available.
+--   Assumes file exists.
+loadInterface
+  :: HscEnv
+  -> FilePath
+  -> Module
+  -> IO (Either String ModIface)
+loadInterface session hiFile mod = do
+  r <- initIfaceLoad session $ readIface mod hiFile
+  case r of
+    Maybes.Succeeded iface -> do
+      return $ Right iface
+    Maybes.Failed err -> do
+      let errMsg = showSDoc (hsc_dflags session) err
+      return $ Left errMsg
