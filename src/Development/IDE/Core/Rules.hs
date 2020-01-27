@@ -117,8 +117,7 @@ getDefinition :: NormalizedFilePath -> Position -> Action (Maybe Location)
 getDefinition file pos = fmap join $ runMaybeT $ do
     opts <- lift getIdeOptions
     spans <- useE GetSpanInfo file
-    pkgState <- hscEnv <$> useE GhcSession file
-    lift $ AtPoint.gotoDefinition (getHieFile opts file) opts pkgState (spansExprs spans) pos
+    lift $ AtPoint.gotoDefinition (getHieFile opts file) opts (spansExprs spans) pos
 
 getHieFile
   :: IdeOptions

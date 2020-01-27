@@ -40,12 +40,11 @@ gotoDefinition
   :: MonadIO m
   => (Module -> m (Maybe (HieFile, FilePath)))
   -> IdeOptions
-  -> HscEnv
   -> [SpanInfo]
   -> Position
   -> m (Maybe Location)
-gotoDefinition getHieFile ideOpts pkgState srcSpans pos =
-  listToMaybe <$> locationsAtPoint getHieFile ideOpts pkgState pos srcSpans
+gotoDefinition getHieFile ideOpts srcSpans pos =
+  listToMaybe <$> locationsAtPoint getHieFile ideOpts pos srcSpans
 
 -- | Synopsis for the name at a given position.
 atPoint
@@ -122,11 +121,10 @@ locationsAtPoint
    . MonadIO m
   => (Module -> m (Maybe (HieFile, FilePath)))
   -> IdeOptions
-  -> HscEnv
   -> Position
   -> [SpanInfo]
   -> m [Location]
-locationsAtPoint getHieFile IdeOptions{..} pkgState pos =
+locationsAtPoint getHieFile IdeOptions{..} pos =
     fmap (map srcSpanToLocation) . mapMaybeM (getSpan . spaninfoSource) . spansAtPoint pos
   where getSpan :: SpanSource -> m (Maybe SrcSpan)
         getSpan NoSource = pure Nothing
