@@ -12,7 +12,6 @@ module Development.IDE.Core.Compile
   , compileModule
   , parseModule
   , typecheckModule
-  , ondiskTypeCheck
   , computePackageDeps
   , addRelativeImport
   , mkTcModuleResult
@@ -32,9 +31,7 @@ import qualified GHC.LanguageExtensions.Type as GHC
 import Development.IDE.Types.Options
 import Development.IDE.Types.Location
 
-import System.IO
 import TcRnMonad
-import TcIface
 
 #if MIN_GHC_API_VERSION(8,6,0)
 import           DynamicLoading (initializePlugins)
@@ -55,6 +52,7 @@ import           LoadIface                      (readIface)
 import qualified Maybes
 import           MkIface
 import           StringBuffer                   as SB
+import           TcIface
 import           TidyPgm
 
 import Control.Monad.Extra
@@ -69,6 +67,7 @@ import           Data.Maybe
 import           Data.Tuple.Extra
 import qualified Data.Map.Strict                          as Map
 import           System.FilePath
+import           System.IO
 
 
 -- | Given a string buffer, return the string (after preprocessing) and the 'ParsedModule'.
@@ -98,75 +97,43 @@ computePackageDeps env pkg = do
             T.pack $ "unknown package: " ++ show pkg]
         Just pkgInfo -> return $ Right $ depends pkgInfo
 
-ondiskTypeCheck :: IdeDefer
+typecheckModule :: IdeDefer
                 -> HscEnv
-                -> [(HomeModInfo, ModSummary)]
+                -> [(ModSummary, (ModIface, Maybe Linkable))]
                 -> ParsedModule
-                -> IO ([FileDiagnostic], Maybe TcModuleResult)
-ondiskTypeCheck defer hsc deps pm = do
+                -> IO (IdeResult TcModuleResult)
+typecheckModule (IdeDefer defer) hsc depsIn pm = do
     fmap (either (, Nothing) (second Just)) $
       runGhcEnv hsc $
       catchSrcErrors "typecheck" $ do
-        let mss = map snd deps
-        session <- getSession
-        setSession session { hsc_mod_graph = mkModuleGraph mss }
-        let installedModules  = map (GHC.InstalledModule (thisInstalledUnitId $ hsc_dflags session) . moduleName . ms_mod) mss
-            installedFindResults = zipWith (\ms im -> InstalledFound (ms_location ms) im) mss installedModules
-        -- We have to create a new IORef here instead of modifying the existing IORef as
-        -- it is shared between concurrent compilations.
-        prevFinderCache <- liftIO $ readIORef $ hsc_FC session
-        let newFinderCache =
-                foldl'
-                    (\fc (im, ifr) -> GHC.extendInstalledModuleEnv fc im ifr) prevFinderCache
-                    $ zip installedModules installedFindResults
-        newFinderCacheVar <- liftIO $ newIORef $! newFinderCache
-        modifySession $ \s -> s { hsc_FC = newFinderCacheVar }
         -- Currently GetDependencies returns things in topological order so A comes before B if A imports B.
         -- We need to reverse this as GHC gets very unhappy otherwise and complains about broken interfaces.
         -- Long-term we might just want to change the order returned by GetDependencies
-        -- FIXME is this reverse still correct
-        mapM_ loadDepModule (reverse $ map fst deps)
-        typeCheckActual defer pm
+        deps <- setupEnv' $ reverse depsIn
+        mapM_ (uncurry loadDepModule) (map snd deps)
 
-loadDepModule :: GhcMonad m => HomeModInfo -> m ()
-loadDepModule HomeModInfo{hm_iface} = do
-    hsc <- getSession
-    details <- liftIO $ fixIO $ \details -> do
-        let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) (moduleName mod) (HomeModInfo hm_iface details Nothing) }
-        initIfaceLoad hsc' (typecheckIface hm_iface)
-    let mod_info = HomeModInfo hm_iface details Nothing
-    modifySession $ \e ->
-        e { hsc_HPT = addToHpt (hsc_HPT e) (moduleName mod) mod_info }
-    where mod = mi_module hm_iface
-
-
--- | Typecheck a single module using the supplied dependencies and packages.
-typecheckModule
-    :: IdeDefer
-    -> HscEnv
-    -> [TcModuleResult]
-    -> ParsedModule
-    -> IO (IdeResult TcModuleResult)
-typecheckModule defer packageState deps pm =
-    fmap (either (, Nothing) (second Just)) $
-    runGhcEnv packageState $
-        catchSrcErrors "typecheck" $ do
-            setupEnv [(tmrModSummary x, tmrModInfo x) | x <- deps]
-            typeCheckActual defer pm
-
-typeCheckActual :: GhcMonad m => IdeDefer -> ParsedModule -> m ([FileDiagnostic], TcModuleResult)
-typeCheckActual (IdeDefer defer) pm = do
-            let modSummary = pm_mod_summary pm
-                dflags = ms_hspp_opts modSummary
-            modSummary' <- initPlugins modSummary
-            (warnings, tcm) <- withWarnings "typecheck" $ \tweak ->
-                GHC.typecheckModule $ enableTopLevelWarnings
-                                    $ demoteIfDefer pm{pm_mod_summary = tweak modSummary'}
-            tcm2 <- mkTcModuleResult tcm
-            let errorPipeline = unDefer . hideDiag dflags
-            return (map errorPipeline warnings, tcm2)
+        let modSummary = pm_mod_summary pm
+            dflags = ms_hspp_opts modSummary
+        modSummary' <- initPlugins modSummary
+        (warnings, tcm) <- withWarnings "typecheck" $ \tweak ->
+            GHC.typecheckModule $ enableTopLevelWarnings
+                                $ demoteIfDefer pm{pm_mod_summary = tweak modSummary'}
+        tcm2 <- mkTcModuleResult tcm
+        let errorPipeline = unDefer . hideDiag dflags
+        return (map errorPipeline warnings, tcm2)
     where
         demoteIfDefer = if defer then demoteTypeErrorsToWarnings else id
+
+loadDepModule :: GhcMonad m => ModIface -> Maybe Linkable -> m ()
+loadDepModule iface linkable = do
+    hsc <- getSession
+    details <- liftIO $ fixIO $ \details -> do
+        let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) (moduleName mod) (HomeModInfo iface details linkable) }
+        initIfaceLoad hsc' (typecheckIface iface)
+    let mod_info = HomeModInfo iface details linkable
+    modifySession $ \e ->
+        e { hsc_HPT = addToHpt (hsc_HPT e) (moduleName mod) mod_info }
+    where mod = mi_module iface
 
 initPlugins :: GhcMonad m => ModSummary -> m ModSummary
 initPlugins modSummary = do
@@ -281,6 +248,12 @@ mkTcModuleResult tcm = do
 -- best understanding (!)
 setupEnv :: GhcMonad m => [(ModSummary, HomeModInfo)] -> m ()
 setupEnv tmsIn = do
+    tms <- setupEnv' tmsIn
+    -- load dependent modules, which must be in topological order.
+    mapM_ (uncurry loadModuleHome) tms
+
+setupEnv' :: GhcMonad m => [(ModSummary, b)] -> m [(ModSummary, b)]
+setupEnv' tmsIn = do
     -- if both a .hs-boot file and a .hs file appear here, we want to make sure that the .hs file
     -- takes precedence, so put the .hs-boot file earlier in the list
     let isSourceFile = (==HsBootFile) . ms_hsc_src
@@ -308,9 +281,7 @@ setupEnv tmsIn = do
     newFinderCacheVar <- liftIO $ newIORef $! newFinderCache
     modifySession $ \s -> s { hsc_FC = newFinderCacheVar }
 
-    -- load dependent modules, which must be in topological order.
-    mapM_ (uncurry loadModuleHome) tms
-
+    return tms
 
 -- | Load a module, quickly. Input doesn't need to be desugared.
 -- A module must be loaded before dependent modules can be typechecked.

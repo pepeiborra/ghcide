@@ -58,7 +58,6 @@ import           Development.Shake                        hiding (Diagnostic)
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Types.Logger (logDebug)
 import Development.IDE.Spans.Type
-import System.IO (fixIO)
 
 import qualified GHC.LanguageExtensions as LangExt
 import           UniqSupply
@@ -66,8 +65,6 @@ import NameCache
 import HscTypes
 import DynFlags (xopt)
 import GHC.Generics(Generic)
-import TcRnMonad (initIfaceLoad)
-import TcIface (typecheckIface)
 
 import qualified Development.IDE.Spans.AtPoint as AtPoint
 import Development.IDE.Core.Service
@@ -305,43 +302,36 @@ getSpanInfoRule =
 
 -- Typechecks a module.
 typeCheckRule :: Rules ()
-typeCheckRule =
-    define $ \TypeCheck file -> do
-        pm <- use_ GetParsedModule file
-        logger  <- actionLogger
-        liftIO $ logDebug logger $ T.pack $ "Typechecking file " <> fromNormalizedFilePath file
-        deps <- use_ GetDependencies file
-        hsc <- hscEnv <$> use_ GhcSession file
-        -- Figure out whether we need TemplateHaskell or QuasiQuotes support
-        let graph_needs_th_qq = needsTemplateHaskellOrQQ $ hsc_mod_graph hsc
-            file_uses_th_qq = uses_th_qq $ ms_hspp_opts (pm_mod_summary pm)
-            any_uses_th_qq = graph_needs_th_qq || file_uses_th_qq
-        mirs <- uses_ GetModIface (transitiveModuleDeps deps)
-        bytecodes <- if any_uses_th_qq
-                  -- If we use TH or QQ, we must obtain the bytecode
-                  then do
-                    fmap Just <$> uses_ GenerateByteCode (transitiveModuleDeps deps)
-                  else
-                    pure $ repeat Nothing
+typeCheckRule = define $ \TypeCheck file -> do
+  pm     <- use_ GetParsedModule file
+  logger <- actionLogger
+  liftIO
+    $  logDebug logger
+    $  T.pack
+    $  "Typechecking file "
+    <> fromNormalizedFilePath file
+  deps <- use_ GetDependencies file
+  hsc  <- hscEnv <$> use_ GhcSession file
+  -- Figure out whether we need TemplateHaskell or QuasiQuotes support
+  let graph_needs_th_qq = needsTemplateHaskellOrQQ $ hsc_mod_graph hsc
+      file_uses_th_qq   = uses_th_qq $ ms_hspp_opts (pm_mod_summary pm)
+      any_uses_th_qq    = graph_needs_th_qq || file_uses_th_qq
+  mirs      <- uses_ GetModIface (transitiveModuleDeps deps)
+  bytecodes <- if any_uses_th_qq
+    then -- If we use TH or QQ, we must obtain the bytecode
+      fmap Just <$> uses_ GenerateByteCode (transitiveModuleDeps deps)
+    else
+      pure $ repeat Nothing
 
-        hmis <- liftIO $ forM (zip mirs bytecodes) $ \(HiFileResult{..}, bc) -> do
-    -- The fixIO here is crucial and matches what GHC does. Otherwise GHC will fail
-    -- to find identifiers in the interface and explode.
-    -- For more details, look at hscIncrementalCompile and Note [Knot-tying typecheckIface] in GHC.
-            d <- fixIO $ \details -> do
-                let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) (moduleName $ mi_module hirModIface) hmi }
-                    hmi = HomeModInfo hirModIface details bc
-                details <- initIfaceLoad hsc' (typecheckIface hirModIface)
-                return $ details
-            return (HomeModInfo hirModIface d bc, hirModSummary)
+  setPriority priorityTypeCheck
+  IdeOptions { optDefer = defer } <- getIdeOptions
 
-        setPriority priorityTypeCheck
-        IdeOptions{ optDefer = defer} <- getIdeOptions
-        liftIO $ ondiskTypeCheck defer hsc hmis pm
-    where
-        uses_th_qq dflags = xopt LangExt.TemplateHaskell dflags || xopt LangExt.QuasiQuotes dflags
---        addByteCode :: Linkable -> (ModSummary, ModIface) -> (ModSummary, ModIface)
---        addByteCode lm tmr = tmr { tmrModInfo = (tmrModInfo tmr) { hm_linkable = Just lm } }
+  liftIO $ typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
+ where
+  unpack HiFileResult{..} bc = (hirModSummary, (hirModIface, bc))
+  uses_th_qq dflags =
+    xopt LangExt.TemplateHaskell dflags || xopt LangExt.QuasiQuotes dflags
+
 
 generateCore :: NormalizedFilePath -> Action (IdeResult (SafeHaskellMode, CgGuts, ModDetails))
 generateCore file = do
@@ -434,7 +424,7 @@ getHiFileRule = define $ \GetHiFile f -> do
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
     filesOfInterest <- getFilesOfInterest
-    let useHiFile =
+    let useHiFile = False &&
           -- Interface files do not carry location information, so
           -- never use interface files if .hie files are not available
           GHC.supportsHieFiles &&
