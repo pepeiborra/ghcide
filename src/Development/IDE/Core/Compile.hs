@@ -17,8 +17,11 @@ module Development.IDE.Core.Compile
   , mkTcModuleResult
   , generateByteCode
   , loadInterface
+  , loadHieFile
+  , generateAndWriteHieFile
   ) where
 
+import Data.ByteString (ByteString)
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Preprocessor
 import Development.IDE.Core.Shake
@@ -43,7 +46,8 @@ import           Lexer
 import ErrUtils
 
 import           Finder
-import qualified GHC
+import qualified Development.IDE.GHC.Compat     as GHC
+import qualified Development.IDE.GHC.Compat     as Compat
 import           GhcMonad
 import           GhcPlugins                     as GHC hiding (fst3, (<>))
 import qualified HeaderInfo                     as Hdr
@@ -51,6 +55,7 @@ import           HscMain                        (hscInteractive)
 import           LoadIface                      (readIface)
 import qualified Maybes
 import           MkIface
+import           NameCache
 import           StringBuffer                   as SB
 import           TcIface
 import           TidyPgm
@@ -244,6 +249,16 @@ mkTcModuleResult tcm = do
   where
     (tcGblEnv, details) = tm_internals_ tcm
 
+generateAndWriteHieFile :: HscEnv -> ByteString -> TypecheckedModule -> IO ()
+generateAndWriteHieFile hscEnv src tcm = do
+    -- Produce and write the hie file
+  hf <- runHsc hscEnv $ traverse
+    (\rnsrc -> GHC.mkHieFile mod_summary (fst $ tm_internals_ tcm) rnsrc src)
+    (tm_renamed_source tcm)
+  GHC.writeHieFile (Compat.ml_hie_file $ ms_location mod_summary) `mapM_` hf
+  where 
+    mod_summary = pm_mod_summary $ tm_parsed_module tcm
+
 -- | Setup the environment that GHC needs according to our
 -- best understanding (!)
 setupEnv :: GhcMonad m => [(ModSummary, HomeModInfo)] -> m ()
@@ -427,3 +442,9 @@ loadInterface session hiFile mod = do
     Maybes.Failed err -> do
       let errMsg = showSDoc (hsc_dflags session) err
       return $ Left errMsg
+
+loadHieFile :: FilePath -> IO GHC.HieFile
+loadHieFile f = do
+        u <- mkSplitUniqSupply 'a'
+        let nameCache = initNameCache u []
+        fmap (GHC.hie_file_result . fst) $ GHC.readHieFile nameCache f

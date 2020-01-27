@@ -15,12 +15,13 @@ module Development.IDE.GHC.Util(
     -- * GHC wrappers
     prettyPrint,
     lookupPackageConfig,
+    textToStringBuffer,
+    stringBufferToByteString,
     moduleImportPath,
     cgGutsToCoreModule,
     fingerprintToBS,
     fingerprintFromStringBuffer,
     -- * General utilities
-    textToStringBuffer,
     readFileUtf8,
     hDuplicateTo',
     ) where
@@ -28,6 +29,7 @@ module Development.IDE.GHC.Util(
 import Config
 import Control.Concurrent
 import Data.List.Extra
+import Data.ByteString.Internal (ByteString(..))
 import Data.Maybe
 import Data.Typeable
 import qualified Data.ByteString.Internal as BS
@@ -89,6 +91,8 @@ lookupPackageConfig unitId env =
 textToStringBuffer :: T.Text -> StringBuffer
 textToStringBuffer = stringToStringBuffer . T.unpack
 
+stringBufferToByteString :: StringBuffer -> ByteString
+stringBufferToByteString StringBuffer{..} = PS buf cur len
 
 -- | Pretty print a GHC value using 'fakeDynFlags'.
 prettyPrint :: Outputable a => a -> String

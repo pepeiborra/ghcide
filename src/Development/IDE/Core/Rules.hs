@@ -29,7 +29,7 @@ import Fingerprint
 
 import Data.Binary
 import Data.Bifunctor (second)
-import Control.Monad
+import Control.Monad.Extra
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Development.IDE.Core.Compile
@@ -60,8 +60,6 @@ import Development.IDE.Types.Logger (logDebug)
 import Development.IDE.Spans.Type
 
 import qualified GHC.LanguageExtensions as LangExt
-import           UniqSupply
-import NameCache
 import HscTypes
 import DynFlags (xopt)
 import GHC.Generics(Generic)
@@ -124,24 +122,25 @@ getHieFile
 getHieFile IdeOptions {..} file mod = do
   (deps, _) <- use_ GetLocatedImports file
   pkgState  <- hscEnv <$> use_ GhcSession file
-  paths     <- case find (\(L _ x, _) -> x == moduleName mod) deps of
+  case find (\(L _ x, _) -> x == moduleName mod) deps of
     Just (_, Just (ArtifactsLocation ml)) ->
-      return $ liftM2 (,) (ml_hie_file ml) (ml_hs_file ml)
+      case (ml_hie_file ml, ml_hs_file ml) of
+        (hiePath, Just modPath) -> do
+          hieFile <- use_ (GetHieFile hiePath) (toNormalizedFilePath modPath)
+          return $ Just (hieFile, modPath)
+        _ -> return Nothing
     _ -> do
       let unitId = moduleUnitId mod
       case lookupPackageConfig unitId pkgState of
         Just pkgConfig -> do
           hieFile <- liftIO $ optLocateHieFile optPkgLocationOpts pkgConfig mod
           path    <- liftIO $ optLocateSrcFile optPkgLocationOpts pkgConfig mod
-          return $ liftM2 (,) hieFile path
+          case (hieFile, path) of
+            (Just hiePath, Just modPath) -> do
+              hieFile <- useNoFile (GetPackageHieFile hiePath)
+              return $ (, modPath) <$> hieFile
+            _ -> return Nothing
         _ -> return Nothing
-  case paths of
-    Nothing                 -> return Nothing
-    Just (hiePath, modPath) -> do
-      hieFile <- useNoFile (GetHieFile hiePath)
-      return $ (, modPath) <$> hieFile
-
-
 
 -- | Parse the contents of a daml file.
 getParsedModule :: NormalizedFilePath -> Action (Maybe ParsedModule)
@@ -326,7 +325,14 @@ typeCheckRule = define $ \TypeCheck file -> do
   setPriority priorityTypeCheck
   IdeOptions { optDefer = defer } <- getIdeOptions
 
-  liftIO $ typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
+  res <- liftIO $ typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
+
+  whenJust (snd res) $ \tcm -> do
+    (_, contents) <- getFileContents file
+    whenJust contents $ \sb ->
+      liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString sb) (tmrModule tcm)
+
+  return res
  where
   unpack HiFileResult{..} bc = (hirModSummary, (hirModIface, bc))
   uses_th_qq dflags =
@@ -380,15 +386,22 @@ loadGhcSession = do
         opts <- getIdeOptions
         return ("" <$ optShakeFiles opts, ([], Just val))
 
+getPackageHieFileRule :: Rules ()
+getPackageHieFileRule =
+    defineNoFile $ \(GetPackageHieFile f) -> do
+    liftIO $ loadHieFile f
 
 getHieFileRule :: Rules ()
 getHieFileRule =
-    defineNoFile $ \(GetHieFile f) -> do
-        logger  <- actionLogger
-        u <- liftIO $ mkSplitUniqSupply 'a'
-        let nameCache = initNameCache u []
-        liftIO $ logDebug logger $ T.pack $ "Loaded ide file " <> f
-        liftIO $ fmap (hie_file_result . fst) $ readHieFile nameCache f
+    define $ \(GetHieFile hie_f) f -> do
+    mbHieTimestamp <- use GetModificationTime $ toNormalizedFilePath hie_f
+    srcTimestamp <- use_ GetModificationTime f
+    case (mbHieTimestamp, srcTimestamp) of
+      (Just (ModificationTime hie), ModificationTime src) | hie > src -> do
+        hf  <- liftIO $ loadHieFile hie_f
+        return ([], Just hf)
+      _ ->
+        return ([], Nothing)
 
 getHiFileRule :: Rules ()
 getHiFileRule = define $ \GetHiFile f -> do
@@ -424,7 +437,7 @@ getHiFileRule = define $ \GetHiFile f -> do
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
     filesOfInterest <- getFilesOfInterest
-    let useHiFile = False &&
+    let useHiFile =
           -- Interface files do not carry location information, so
           -- never use interface files if .hie files are not available
           GHC.supportsHieFiles &&
@@ -452,6 +465,7 @@ mainRule = do
     generateCoreRule
     generateByteCodeRule
     loadGhcSession
+    getPackageHieFileRule
     getHieFileRule
     getHiFileRule
     getModIfaceRule

@@ -97,7 +97,7 @@ getModificationTimeRule :: VFSHandle -> Rules ()
 getModificationTimeRule vfs =
     defineEarlyCutoff $ \GetModificationTime file -> do
         let file' = fromNormalizedFilePath file
-        let wrap time = (Just time, ([], Just $ ModificationTime time))
+        let wrap time = (Just $ BS.pack $ show time, ([], Just $ ModificationTime time))
         alwaysRerun
         mbVirtual <- liftIO $ getVirtualFile vfs $ filePathToUri' file
         case mbVirtual of
@@ -117,11 +117,13 @@ getModificationTimeRule vfs =
     -- We might also want to try speeding this up on Windows at some point.
     -- TODO leverage DidChangeWatchedFile lsp notifications on clients that
     -- support them, as done for GetFileExists
-    getModTime :: FilePath -> IO BS.ByteString
+    getModTime :: FilePath -> IO (Int,Int)
     getModTime f =
 #ifdef mingw32_HOST_OS
         do time <- Dir.getModificationTime f
-           pure $! BS.pack $ show (toModifiedJulianDay $ utctDay time, diffTimeToPicoseconds $ utctDayTime time)
+           let !day = toModifiedJulianDay $ utctDay time
+               !dayTime = diffTimeToPicoseconds $ utctDayTime time
+           pure $! (day, dayTime)
 #else
         withCString f $ \f' ->
         alloca $ \secPtr ->
@@ -129,7 +131,7 @@ getModificationTimeRule vfs =
             Posix.throwErrnoPathIfMinus1Retry_ "getmodtime" f $ c_getModTime f' secPtr nsecPtr
             sec <- peek secPtr
             nsec <- peek nsecPtr
-            pure $! BS.pack $ show sec <> "." <> show nsec
+            pure $! (fromEnum sec, fromIntegral nsec)
 
 -- Sadly even unix’s getFileStatus + modificationTimeHiRes is still about twice as slow
 -- as doing the FFI call ourselves :(.

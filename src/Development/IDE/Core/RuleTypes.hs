@@ -94,7 +94,10 @@ type instance RuleResult GetLocatedImports = ([(Located ModuleName, Maybe Artifa
 -- we can only report diagnostics for the current file.
 type instance RuleResult ReportImportCycles = ()
 
--- | Read the given HIE file.
+-- | Read the given HIE file for an external package
+type instance RuleResult GetPackageHieFile = HieFile
+
+-- | Read or generate the given HIE file for a local module
 type instance RuleResult GetHieFile = HieFile
 
 -- | Read the module interface file
@@ -165,6 +168,15 @@ instance Binary   GhcSession
 
 -- Note that we embed the filepath here instead of using the filepath associated with Shake keys.
 -- Otherwise we will garbage collect the result since files in package dependencies will not be declared reachable.
+data GetPackageHieFile = GetPackageHieFile FilePath
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetPackageHieFile
+instance NFData   GetPackageHieFile
+instance Binary   GetPackageHieFile
+
+-- In this case we embed the filepath for the hie file.
+-- The filepath of the source file (associated with the Shake key)
+-- is used to track staleness.
 data GetHieFile = GetHieFile FilePath
     deriving (Eq, Show, Typeable, Generic)
 instance Hashable GetHieFile

@@ -12,6 +12,7 @@ module Development.IDE.GHC.Compat(
     mkHieFile,
     writeHieFile,
     readHieFile,
+    ml_hie_file,
     hPutStringBuffer,
     includePathsGlobal,
     includePathsQuote,
@@ -25,11 +26,12 @@ module Development.IDE.GHC.Compat(
     pattern IEThingWith,
     GHC.ModLocation,
     pattern ModLocation,
-    ml_hie_file,
 
     module GHC,
+
     supportsHieFiles
     ) where
+
 
 import StringBuffer
 import DynFlags
@@ -37,15 +39,13 @@ import FieldLabel
 
 #if MIN_GHC_API_VERSION(8,8,0)
 import Data.List.Extra (enumerate)
-import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation, ml_hie_file)
-#else
-import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
 #endif
 
+import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
 import qualified GHC
 
 #if MIN_GHC_API_VERSION(8,8,0)
-import HieAst
+import Development.IDE.GHC.HieAst
 import HieBin
 import HieTypes
 
@@ -76,6 +76,9 @@ writeHieFile _ _ = return ()
 
 readHieFile :: NameCache -> FilePath -> IO (HieFileResult, ())
 readHieFile _ _ = return (HieFileResult (HieFile () []), ())
+
+ml_hie_file :: GHC.ModLocation -> FilePath
+ml_hie_file _ = ""
 
 data HieFile = HieFile {hie_module :: (), hie_exports :: [AvailInfo]}
 data HieFileResult = HieFileResult { hie_file_result :: HieFile }
@@ -161,12 +164,4 @@ pattern ModLocation a b c <-
     GHC.ModLocation a b c _ where ModLocation a b c = GHC.ModLocation a b c ""
 #else
     GHC.ModLocation a b c where ModLocation a b c = GHC.ModLocation a b c
-#endif
-
-ml_hie_file :: GHC.ModLocation -> Maybe FilePath
-ml_hie_file =
-#if MIN_GHC_API_VERSION(8,8,0)
-    Just . GHC.ml_hie_file
-#else
-    const Nothing
 #endif
