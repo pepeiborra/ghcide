@@ -229,7 +229,7 @@ diagnosticTests = testGroup "diagnostics"
       let change = TextDocumentContentChangeEvent
             { _range = Just (Range (Position 0 0) (Position 0 20))
             , _rangeLength = Nothing
-            , _text = ""
+            , _text = "module ModuleC where"
             }
       changeDoc docA [change]
       expectDiagnostics [("ModuleB.hs", [(DsError, (1, 0), "Could not find module")])]
@@ -877,7 +877,9 @@ insertNewDefinitionTests :: TestTree
 insertNewDefinitionTests = testGroup "insert new definition actions"
   [ testSession "insert new function definition" $ do
       let txtB =
-            ["foo True = select [True]"
+            ["module M where"
+            ,"foo :: Bool -> Bool"
+            ,"foo True = select [True]"
             , ""
             ,"foo False = False"
             ]
@@ -889,7 +891,7 @@ insertNewDefinitionTests = testGroup "insert new definition actions"
       _ <- waitForDiagnostics
       CACodeAction action@CodeAction { _title = actionTitle } : _
                   <- sortOn (\(CACodeAction CodeAction{_title=x}) -> x) <$>
-                     getCodeActions docB (R 1 0 1 50)
+                     getCodeActions docB (R 0 0 2 50)
       liftIO $ actionTitle @?= "Define select :: [Bool] -> Bool"
       executeCodeAction action
       contentAfterAction <- documentContents docB
@@ -901,7 +903,8 @@ insertNewDefinitionTests = testGroup "insert new definition actions"
         ++ txtB')
   , testSession "define a hole" $ do
       let txtB =
-            ["foo True = _select [True]"
+            ["module M where"
+            ,"foo True = _select [True]"
             , ""
             ,"foo False = False"
             ]
@@ -913,12 +916,13 @@ insertNewDefinitionTests = testGroup "insert new definition actions"
       _ <- waitForDiagnostics
       CACodeAction action@CodeAction { _title = actionTitle } : _
                   <- sortOn (\(CACodeAction CodeAction{_title=x}) -> x) <$>
-                     getCodeActions docB (R 1 0 1 50)
+                     getCodeActions docB (R 0 0 2 50)
       liftIO $ actionTitle @?= "Define select :: [Bool] -> Bool"
       executeCodeAction action
       contentAfterAction <- documentContents docB
       liftIO $ contentAfterAction @?= T.unlines (
-        ["foo True = select [True]"
+        ["module M where"
+        ,"foo True = select [True]"
         , ""
         ,"foo False = False"
         , ""
