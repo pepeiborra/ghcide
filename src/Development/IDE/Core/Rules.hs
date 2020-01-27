@@ -42,7 +42,7 @@ import           Development.IDE.Core.FileExists
 import           Development.IDE.Core.FileStore        (getFileContents)
 import           Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
-import Development.IDE.GHC.Compat hiding (parseModule, typecheckModule)
+import Development.IDE.GHC.Compat as GHC hiding (parseModule, typecheckModule)
 import Development.IDE.GHC.Util
 import Data.Coerce
 import Data.Either.Extra
@@ -400,24 +400,19 @@ getHieFileRule =
         liftIO $ logDebug logger $ T.pack $ "Loaded ide file " <> f
         liftIO $ fmap (hie_file_result . fst) $ readHieFile nameCache f
 
--- TODO handle hi-boot files
 getHiFileRule :: Rules ()
 getHiFileRule = define $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
   logger  <- actionLogger
   pm      <- use_ GetParsedModule f
-  filesOfInterest <- getFilesOfInterest
   -- TODO find the hi file without relying on the parsed module
   --      it should be possible to construct a ModSummary parsing just the imports
   --      (see HeaderInfo in the GHC package)
   let hiFile = ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
   gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
-  if not gotHiFile || f `elem` filesOfInterest
+  if gotHiFile
     then do
-      liftIO $ logDebug logger $ T.pack ("Missing interface file for" <> hiFile)
-      pure ([], Nothing)
-    else do
       r <- liftIO $ loadInterface session hiFile (ms_mod ms)
       case r of
         Right iface -> do
@@ -425,23 +420,27 @@ getHiFileRule = define $ \GetHiFile f -> do
           liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
           return ([], Just result)
         Left err -> do
-          let d = Diagnostic { _range              = noRange
-                             , _severity           = Nothing
-                             , _code               = Nothing
-                             , _source             = Just "CPP"
-                             , _message            = errMsg
-                             , _relatedInformation = Nothing
-                             }
+          let d = ideErrorText f errMsg
               errMsg = T.pack err
           liftIO
             $  logDebug logger
             $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
             <> errMsg
-          return ([(f, ShowDiag, d)], Nothing)
+          return ([d], Nothing)
+    else do
+      liftIO $ logDebug logger $ T.pack ("Missing or stale interface file for" <> hiFile)
+      pure ([], Nothing)
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
-    mbHiFile <- use GetHiFile f
+    filesOfInterest <- getFilesOfInterest
+    let useHiFile =
+          -- Interface files do not carry location information, so
+          -- never use interface files if .hie files are not available
+          GHC.supportsHieFiles &&
+          -- Never load interface files for files of interest
+          f `notElem` filesOfInterest
+    mbHiFile <- if useHiFile then use GetHiFile f else return Nothing
     case mbHiFile of
         Just x ->
             return ([], Just x)
