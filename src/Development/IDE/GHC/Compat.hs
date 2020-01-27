@@ -35,8 +35,14 @@ import StringBuffer
 import DynFlags
 import FieldLabel
 
-import qualified GHC
+#if MIN_GHC_API_VERSION(8,8,0)
+import Data.List.Extra (enumerate)
 import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation, ml_hie_file)
+#else
+import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
+#endif
+
+import qualified GHC
 
 #if MIN_GHC_API_VERSION(8,8,0)
 import HieAst
