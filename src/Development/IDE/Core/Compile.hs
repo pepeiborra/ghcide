@@ -72,7 +72,8 @@ import           Data.Maybe
 import           Data.Tuple.Extra
 import qualified Data.Map.Strict                          as Map
 import           System.FilePath
-import           System.IO
+import           System.Directory
+import           System.IO.Extra
 
 
 -- | Given a string buffer, return the string (after preprocessing) and the 'ParsedModule'.
@@ -251,12 +252,15 @@ mkTcModuleResult tcm = do
 
 generateAndWriteHieFile :: HscEnv -> ByteString -> TypecheckedModule -> IO ()
 generateAndWriteHieFile hscEnv src tcm = do
+  let targetPath = Compat.ml_hie_file $ ms_location mod_summary
+  (tempFilePath, _delete) <- newTempFileWithin (takeDirectory targetPath)
     -- Produce and write the hie file
   hf <- runHsc hscEnv $ traverse
     (\rnsrc -> GHC.mkHieFile mod_summary (fst $ tm_internals_ tcm) rnsrc src)
     (tm_renamed_source tcm)
-  GHC.writeHieFile (Compat.ml_hie_file $ ms_location mod_summary) `mapM_` hf
-  where 
+  GHC.writeHieFile tempFilePath `mapM_` hf
+  renameFile tempFilePath targetPath
+  where
     mod_summary = pm_mod_summary $ tm_parsed_module tcm
 
 -- | Setup the environment that GHC needs according to our
