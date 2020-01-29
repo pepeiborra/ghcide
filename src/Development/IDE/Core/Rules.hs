@@ -394,13 +394,18 @@ getPackageHieFileRule =
 getHieFileRule :: Rules ()
 getHieFileRule =
     define $ \(GetHieFile hie_f) f -> do
+    logger <- actionLogger
     mbHieTimestamp <- use GetModificationTime $ toNormalizedFilePath hie_f
     srcTimestamp <- use_ GetModificationTime f
     case (mbHieTimestamp, srcTimestamp) of
       (Just (ModificationTime hie), ModificationTime src) | hie > src -> do
         hf  <- liftIO $ loadHieFile hie_f
+        liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
         return ([], Just hf)
-      _ ->
+      _ -> do
+        if isJust mbHieTimestamp
+          then liftIO $ logDebug logger $ T.pack $ "skipping stale .hie file: " <> hie_f
+          else liftIO $ logDebug logger $ T.pack $ "failed to load .hie missing file: " <> hie_f
         return ([], Nothing)
 
 getHiFileRule :: Rules ()
