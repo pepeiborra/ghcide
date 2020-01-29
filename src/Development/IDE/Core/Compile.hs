@@ -21,7 +21,7 @@ module Development.IDE.Core.Compile
   , generateAndWriteHieFile
   ) where
 
-import Data.ByteString (ByteString)
+import Data.ByteString as BS (ByteString, readFile)
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Preprocessor
 import Development.IDE.Core.Shake
@@ -250,18 +250,24 @@ mkTcModuleResult tcm = do
   where
     (tcGblEnv, details) = tm_internals_ tcm
 
-generateAndWriteHieFile :: HscEnv -> ByteString -> TypecheckedModule -> IO ()
-generateAndWriteHieFile hscEnv src tcm = do
-  let targetPath = Compat.ml_hie_file $ ms_location mod_summary
+generateAndWriteHieFile :: HscEnv -> Maybe ByteString -> TypecheckedModule -> IO ()
+generateAndWriteHieFile hscEnv mb_src tcm = do
   (tempFilePath, _delete) <- newTempFileWithin (takeDirectory targetPath)
-    -- Produce and write the hie file
-  hf <- runHsc hscEnv $ traverse
-    (\rnsrc -> GHC.mkHieFile mod_summary (fst $ tm_internals_ tcm) rnsrc src)
-    (tm_renamed_source tcm)
-  GHC.writeHieFile tempFilePath `mapM_` hf
-  renameFile tempFilePath targetPath
+  src <- maybe (BS.readFile `traverse` srcPath) (return . Just) mb_src
+  case (src, tm_renamed_source tcm) of
+    (Just src, Just rnsrc) -> do
+      hf <- runHsc hscEnv $
+        GHC.mkHieFile mod_summary (fst $ tm_internals_ tcm) rnsrc src
+      -- atomic file system update
+      GHC.writeHieFile tempFilePath hf
+      renameFile tempFilePath targetPath
+    _ ->
+      return ()
   where
-    mod_summary = pm_mod_summary $ tm_parsed_module tcm
+    mod_summary  = pm_mod_summary $ tm_parsed_module tcm
+    mod_location = ms_location mod_summary
+    srcPath      = ml_hs_file mod_location
+    targetPath   = Compat.ml_hie_file mod_location
 
 -- | Setup the environment that GHC needs according to our
 -- best understanding (!)

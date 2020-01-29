@@ -329,8 +329,7 @@ typeCheckRule = define $ \TypeCheck file -> do
 
   whenJust (snd res) $ \tcm -> do
     (_, contents) <- getFileContents file
-    whenJust contents $ \sb ->
-      liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString sb) (tmrModule tcm)
+    liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString <$> contents) (tmrModule tcm)
 
   return res
  where
@@ -392,23 +391,35 @@ getPackageHieFileRule =
     liftIO $ loadHieFile f
 
 getHieFileRule :: Rules ()
-getHieFileRule =
-    define $ \(GetHieFile hie_f) f -> do
-    logger <- actionLogger
-    let normal_hie_f = toNormalizedFilePath hie_f
-    gotHieFile <- getFileExists normal_hie_f
-    mbHieTimestamp <- use GetModificationTime $ normal_hie_f
-    srcTimestamp <- use_ GetModificationTime f
-    case (mbHieTimestamp, srcTimestamp) of
-      (Just (ModificationTime hie), ModificationTime src) | gotHieFile, hie > src -> do
-        hf  <- liftIO $ loadHieFile hie_f
-        liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
-        return ([], Just hf)
-      _ -> do
-        if isJust mbHieTimestamp
-          then liftIO $ logDebug logger $ T.pack $ "skipping stale .hie file: " <> hie_f
-          else liftIO $ logDebug logger $ T.pack $ "failed to load .hie missing file: " <> hie_f
-        return ([], Nothing)
+getHieFileRule = define $ \(GetHieFile hie_f) f -> do
+  logger <- actionLogger
+  let normal_hie_f = toNormalizedFilePath hie_f
+  gotHieFile     <- getFileExists normal_hie_f
+  mbHieTimestamp <- use GetModificationTime $ normal_hie_f
+  srcTimestamp   <- use_ GetModificationTime f
+  case (mbHieTimestamp, srcTimestamp) of
+    (Just (ModificationTime hie), ModificationTime src)
+      | gotHieFile, hie > src -> pure ()
+    _ -> do
+      if isJust mbHieTimestamp
+        then
+          liftIO
+          $  logDebug logger
+          $  T.pack
+          $  "regenerating stale .hie file: "
+          <> hie_f
+        else
+          liftIO
+          $  logDebug logger
+          $  T.pack
+          $  "generating missing .hie file: "
+          <> hie_f
+      -- typecheck generates a .hie file as a side effect
+      void $ use_ TypeCheck f
+  hf <- liftIO $ loadHieFile hie_f
+  liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
+  return ([], Just hf)
+
 
 getHiFileRule :: Rules ()
 getHiFileRule = define $ \GetHiFile f -> do
