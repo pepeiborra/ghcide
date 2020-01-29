@@ -116,18 +116,18 @@ getDefinition file pos = fmap join $ runMaybeT $ do
 
 getHieFile
   :: IdeOptions
-  -> NormalizedFilePath
-  -> Module
-  -> Action (Maybe (HieFile, FilePath))
+  -> NormalizedFilePath -- ^ file we're editing
+  -> Module -- ^ module dep we want info for
+  -> Action (Maybe (HieFile, FilePath)) -- ^ hie stuff for the module
 getHieFile IdeOptions {..} file mod = do
-  (deps, _) <- use_ GetLocatedImports file
+  TransitiveDependencies {transitiveNamedModuleDeps} <- use_ GetDependencies file
   pkgState  <- hscEnv <$> use_ GhcSession file
-  case find (\(L _ x, _) -> x == moduleName mod) deps of
-    Just (_, Just (ArtifactsLocation ml)) ->
+  case find (\x -> nmdModuleName x == moduleName mod) transitiveNamedModuleDeps of
+    Just NamedModuleDep{nmdModLocation=ml} ->
       case (ml_hie_file ml, ml_hs_file ml) of
         (hiePath, Just modPath) -> do
-          hieFile <- use_ (GetHieFile hiePath) (toNormalizedFilePath modPath)
-          return $ Just (hieFile, modPath)
+          hieFile <- use (GetHieFile hiePath) (toNormalizedFilePath modPath)
+          return $ (, modPath) <$> hieFile
         _ -> return Nothing
     _ -> do
       let unitId = moduleUnitId mod
@@ -292,7 +292,7 @@ getSpanInfoRule :: Rules ()
 getSpanInfoRule =
     define $ \GetSpanInfo file -> do
         tc <- use_ TypeCheck file
-        deps <- maybe (TransitiveDependencies [] []) fst <$> useWithStale GetDependencies file
+        deps <- maybe (TransitiveDependencies [] [] []) fst <$> useWithStale GetDependencies file
         tms <- mapMaybe (fmap fst) <$> usesWithStale GetParsedModule (transitiveModuleDeps deps)
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
@@ -395,10 +395,12 @@ getHieFileRule :: Rules ()
 getHieFileRule =
     define $ \(GetHieFile hie_f) f -> do
     logger <- actionLogger
-    mbHieTimestamp <- use GetModificationTime $ toNormalizedFilePath hie_f
+    let normal_hie_f = toNormalizedFilePath hie_f
+    gotHieFile <- getFileExists normal_hie_f
+    mbHieTimestamp <- use GetModificationTime $ normal_hie_f
     srcTimestamp <- use_ GetModificationTime f
     case (mbHieTimestamp, srcTimestamp) of
-      (Just (ModificationTime hie), ModificationTime src) | hie > src -> do
+      (Just (ModificationTime hie), ModificationTime src) | gotHieFile, hie > src -> do
         hf  <- liftIO $ loadHieFile hie_f
         liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
         return ([], Just hf)
