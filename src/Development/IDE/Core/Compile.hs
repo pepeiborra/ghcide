@@ -19,6 +19,7 @@ module Development.IDE.Core.Compile
   , loadInterface
   , loadHieFile
   , generateAndWriteHieFile
+  , loadDepModule
   ) where
 
 import Data.ByteString as BS (ByteString, readFile)
@@ -129,17 +130,6 @@ typecheckModule (IdeDefer defer) hsc depsIn pm = do
         return (map errorPipeline warnings, tcm2)
     where
         demoteIfDefer = if defer then demoteTypeErrorsToWarnings else id
-
-loadDepModule :: GhcMonad m => ModIface -> Maybe Linkable -> m ()
-loadDepModule iface linkable = do
-    hsc <- getSession
-    details <- liftIO $ fixIO $ \details -> do
-        let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) (moduleName mod) (HomeModInfo iface details linkable) }
-        initIfaceLoad hsc' (typecheckIface iface)
-    let mod_info = HomeModInfo iface details linkable
-    modifySession $ \e ->
-        e { hsc_HPT = addToHpt (hsc_HPT e) (moduleName mod) mod_info }
-    where mod = mi_module iface
 
 initPlugins :: GhcMonad m => ModSummary -> m ModSummary
 initPlugins modSummary = do
@@ -275,7 +265,7 @@ setupEnv :: GhcMonad m => [(ModSummary, HomeModInfo)] -> m ()
 setupEnv tmsIn = do
     tms <- setupEnv' tmsIn
     -- load dependent modules, which must be in topological order.
-    mapM_ (uncurry loadModuleHome) tms
+    mapM_ (\(ms, hmi) -> loadModuleHome (ms_mod_name ms) hmi) tms
 
 setupEnv' :: GhcMonad m => [(ModSummary, b)] -> m [(ModSummary, b)]
 setupEnv' tmsIn = do
@@ -314,13 +304,23 @@ setupEnv' tmsIn = do
 -- modifies the session.
 loadModuleHome
     :: (GhcMonad m)
-    => ModSummary
+    => ModuleName
     -> HomeModInfo
     -> m ()
-loadModuleHome ms mod_info = modifySession $ \e ->
+loadModuleHome mod mod_info = modifySession $ \e ->
     e { hsc_HPT = addToHpt (hsc_HPT e) mod mod_info }
-  where
-    mod      = ms_mod_name ms
+
+-- | Load module interface.
+loadDepModule :: GhcMonad m => ModIface -> Maybe Linkable -> m ()
+loadDepModule iface linkable = do
+    hsc <- getSession
+    details <- liftIO $ fixIO $ \details -> do
+        let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) mod (HomeModInfo iface details linkable) }
+        initIfaceLoad hsc' (typecheckIface iface)
+    let mod_info = HomeModInfo iface details linkable
+    loadModuleHome mod mod_info
+    where
+      mod = moduleName $ mi_module iface
 
 
 

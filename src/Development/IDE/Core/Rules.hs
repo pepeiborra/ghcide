@@ -293,10 +293,13 @@ getSpanInfoRule =
     define $ \GetSpanInfo file -> do
         tc <- use_ TypeCheck file
         deps <- maybe (TransitiveDependencies [] [] []) fst <$> useWithStale GetDependencies file
-        tms <- mapMaybe (fmap fst) <$> usesWithStale GetParsedModule (transitiveModuleDeps deps)
+        let tdeps = transitiveModuleDeps deps
+        pms <- uses_ GetParsedModule tdeps
+        ifaces <- uses_ GetModIface tdeps
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
-        x <- liftIO $ getSrcSpanInfos packageState (fmap (second (fmap modLocationToNormalizedFilePath)) $ fileImports) (tmrModule tc) tms
+        let imports = second (fmap modLocationToNormalizedFilePath) <$> fileImports
+        x <- liftIO $ getSrcSpanInfos packageState imports (tmrModule tc) (zip pms $ map hirModIface ifaces)
         return ([], Just x)
 
 -- Typechecks a module.
