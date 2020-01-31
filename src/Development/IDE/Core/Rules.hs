@@ -333,6 +333,7 @@ typeCheckRule = define $ \TypeCheck file -> do
   whenJust (snd res) $ \tcm -> do
     (_, contents) <- getFileContents file
     liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString <$> contents) (tmrModule tcm)
+    liftIO $ generateAndWriteHiFile hsc tcm
 
   return res
  where

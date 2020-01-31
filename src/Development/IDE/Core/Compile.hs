@@ -19,6 +19,7 @@ module Development.IDE.Core.Compile
   , loadInterface
   , loadHieFile
   , generateAndWriteHieFile
+  , generateAndWriteHiFile
   , loadDepModule
   ) where
 
@@ -262,9 +263,14 @@ generateAndWriteHieFile hscEnv mb_src tcm = do
     srcPath      = ml_hs_file mod_location
     targetPath   = Compat.ml_hie_file mod_location
 
-generateAndWriteHiFile :: HscEnv -> TypeCheckedModule -> IO ()
-generateAndWriteHieFile hscEnv tc = do
-  atomicFileUpdate targetPath $ \fp -> writeIfaceFile dflags fp 
+generateAndWriteHiFile :: HscEnv -> TcModuleResult -> IO ()
+generateAndWriteHiFile hscEnv tc = do
+  atomicFileUpdate targetPath $ \fp ->
+    writeIfaceFile dflags fp modIface
+  where
+    modIface = hm_iface $ tmrModInfo tc
+    targetPath = ml_hi_file $ ms_location $ tmrModSummary tc
+    dflags = hsc_dflags hscEnv
 
 -- | Setup the environment that GHC needs according to our
 -- best understanding (!)
