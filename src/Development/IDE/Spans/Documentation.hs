@@ -56,10 +56,12 @@ getDocumentation tcs targetName = fromMaybe [] $ do
   tc <-
     find ((==) (Just $ srcSpanFile targetNameSpan) . annotationFileName)
       $ reverse tcs -- TODO : Is reversing the list here really neccessary?
-  -- Names bound by the module (we want to exclude non-"top-level"
-  -- bindings but unfortunately we get all here).
-  let bs = mapMaybe name_of_bind
-               (listifyAllSpans (pm_parsed_source tc) :: [LHsBind GhcPs])
+
+  -- Top level names bound by the module
+  let bs = [ n | let L _ HsModule{hsmodDecls} = pm_parsed_source tc
+           , L _ (ValD _ hsbind) <- hsmodDecls
+           , Just n <- [name_of_bind hsbind]
+           ]
   -- Sort the names' source spans.
   let sortedSpans = sortedNameSpans bs
   -- Now go ahead and extract the docs.
@@ -81,8 +83,8 @@ getDocumentation tcs targetName = fromMaybe [] $ do
   where
     -- Get the name bound by a binding. We only concern ourselves with
     -- @FunBind@ (which covers functions and variables).
-    name_of_bind :: LHsBind GhcPs -> Maybe (Located RdrName)
-    name_of_bind (L _ FunBind {fun_id}) = Just fun_id
+    name_of_bind :: HsBind GhcPs -> Maybe (Located RdrName)
+    name_of_bind (FunBind {fun_id}) = Just fun_id
     name_of_bind _ = Nothing
     -- Get source spans from names, discard unhelpful spans, remove
     -- duplicates and sort.
