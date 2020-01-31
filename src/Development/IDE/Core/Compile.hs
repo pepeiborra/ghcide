@@ -240,17 +240,21 @@ mkTcModuleResult tcm = do
   where
     (tcGblEnv, details) = tm_internals_ tcm
 
+atomicFileUpdate :: FilePath -> (FilePath -> IO a) -> IO ()
+atomicFileUpdate targetPath write = do
+  (tempFilePath, _delete) <- newTempFileWithin (takeDirectory targetPath)
+  write tempFilePath
+  renameFile tempFilePath targetPath
+
+
 generateAndWriteHieFile :: HscEnv -> Maybe ByteString -> TypecheckedModule -> IO ()
 generateAndWriteHieFile hscEnv mb_src tcm = do
-  (tempFilePath, _delete) <- newTempFileWithin (takeDirectory targetPath)
   src <- maybe (BS.readFile `traverse` srcPath) (return . Just) mb_src
   case (src, tm_renamed_source tcm) of
     (Just src, Just rnsrc) -> do
       hf <- runHsc hscEnv $
         GHC.mkHieFile mod_summary (fst $ tm_internals_ tcm) rnsrc src
-      -- atomic file system update
-      GHC.writeHieFile tempFilePath hf
-      renameFile tempFilePath targetPath
+      atomicFileUpdate targetPath $ flip GHC.writeHieFile hf
     _ ->
       return ()
   where
