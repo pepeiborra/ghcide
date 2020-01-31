@@ -61,6 +61,7 @@ import           StringBuffer                   as SB
 import           TcIface
 import           TidyPgm
 
+import Control.Exception
 import Control.Monad.Extra
 import Control.Monad.Except
 import Control.Monad.Trans.Except
@@ -242,10 +243,8 @@ mkTcModuleResult tcm = do
 
 atomicFileUpdate :: FilePath -> (FilePath -> IO a) -> IO ()
 atomicFileUpdate targetPath write = do
-  (tempFilePath, _delete) <- newTempFileWithin (takeDirectory targetPath)
-  write tempFilePath
-  renameFile tempFilePath targetPath
-
+  (tempFilePath, cleanUp) <- newTempFileWithin (takeDirectory targetPath)
+  (write tempFilePath >> renameFile tempFilePath targetPath) `onException` cleanUp
 
 generateAndWriteHieFile :: HscEnv -> Maybe ByteString -> TypecheckedModule -> IO ()
 generateAndWriteHieFile hscEnv mb_src tcm = do
@@ -262,6 +261,10 @@ generateAndWriteHieFile hscEnv mb_src tcm = do
     mod_location = ms_location mod_summary
     srcPath      = ml_hs_file mod_location
     targetPath   = Compat.ml_hie_file mod_location
+
+generateAndWriteHiFile :: HscEnv -> TypeCheckedModule -> IO ()
+generateAndWriteHieFile hscEnv tc = do
+  atomicFileUpdate targetPath $ \fp -> writeIfaceFile dflags fp 
 
 -- | Setup the environment that GHC needs according to our
 -- best understanding (!)
