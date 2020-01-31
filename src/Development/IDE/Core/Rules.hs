@@ -437,7 +437,12 @@ getHiFileRule = define $ \GetHiFile f -> do
   gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
   if gotHiFile
     then do
+
+      -- Artificial dependency on the .hi file for good measure
+      _ <- use_ GetModificationTime $ toNormalizedFilePath hiFile
+
       r <- liftIO $ loadInterface session hiFile (ms_mod ms)
+
       case r of
         Right iface -> do
           let result = HiFileResult ms iface
