@@ -97,11 +97,12 @@ getModificationTimeRule :: VFSHandle -> Rules ()
 getModificationTimeRule vfs =
     defineEarlyCutoff $ \GetModificationTime file -> do
         let file' = fromNormalizedFilePath file
-        let wrap time = (Just $ BS.pack $ show time, ([], Just $ ModificationTime time))
+        let wrap time@(l,s) = (Just $ BS.pack $ show time, ([], Just $ ModificationTime l s))
         alwaysRerun
         mbVirtual <- liftIO $ getVirtualFile vfs $ filePathToUri' file
         case mbVirtual of
-            Just (virtualFileVersion -> ver) -> pure (Just $ BS.pack $ show ver, ([], Just $ VFSVersion ver))
+            Just (virtualFileVersion -> ver) ->
+                pure (Just $ BS.pack $ show ver, ([], Just $ VFSVersion ver))
             Nothing -> liftIO $ fmap wrap (getModTime file')
               `catch` \(e :: IOException) -> do
                 let err | isDoesNotExistError e = "File does not exist: " ++ file'

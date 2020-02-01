@@ -51,6 +51,7 @@ import           Data.Foldable
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List
+import Data.Ord
 import qualified Data.Set                                 as Set
 import qualified Data.Text                                as T
 import           Development.IDE.GHC.Error
@@ -398,12 +399,11 @@ getHieFileRule :: Rules ()
 getHieFileRule = define $ \(GetHieFile hie_f) f -> do
   logger <- actionLogger
   let normal_hie_f = toNormalizedFilePath hie_f
-  gotHieFile     <- getFileExists normal_hie_f
   mbHieTimestamp <- use GetModificationTime $ normal_hie_f
   srcTimestamp   <- use_ GetModificationTime f
   case (mbHieTimestamp, srcTimestamp) of
-    (Just (ModificationTime hie), ModificationTime src)
-      | gotHieFile, hie > src -> pure ()
+    (Just hie, src)
+      | comparing modificationTime hie src == GT -> pure ()
     _ -> do
       if isJust mbHieTimestamp
         then
