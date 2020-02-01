@@ -475,7 +475,9 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   --      it should be possible to construct a ModSummary parsing just the imports
   --      (see HeaderInfo in the GHC package)
   pm      <- use_ GetParsedModule f
-  let hiFile = ml_hi_file $ ms_location ms
+  let hiFile = case ms_hsc_src ms of
+                HsBootFile -> addBootSuffix (ml_hi_file $ ms_location ms)
+                _ -> ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
 
   let noHiFile = do
