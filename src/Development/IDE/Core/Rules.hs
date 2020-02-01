@@ -424,45 +424,75 @@ getHieFileRule = define $ \(GetHieFile hie_f) f -> do
   liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
   return ([], Just hf)
 
+{- Recompilation checking for interface files
+
+   GHC comes with plenty of logic for deciding whether a .hi file should be up to date,
+   but we choose not to use it since it would be duplicating efforts with the Shake graph.
+   Moreover, since we load every .hi file in isolation, it would be a lot of wasted work to
+   set up the `RnM` environment every time (and I have no clue how to do it properly).
+
+   Instead we rely on Shake to keep things up-to-date. An interface file is considered fresh if:
+     1. Its timestamp is more recent than the source module
+     2. All its dependencies are fresh
+ -}
 
 getHiFileRule :: Rules ()
-getHiFileRule = define $ \GetHiFile f -> do
+getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
   logger  <- actionLogger
-  pm      <- use_ GetParsedModule f
+  -- FIXME this dependency causes unnecessary reloading
+  filesOfInterest <- getFilesOfInterest
+
+  -- get all dependencies interface files, to check for freshness
+  (deps,_)<- use_ GetLocatedImports f
+  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
+
   -- TODO find the hi file without relying on the parsed module
   --      it should be possible to construct a ModSummary parsing just the imports
   --      (see HeaderInfo in the GHC package)
+  pm      <- use_ GetParsedModule f
   let hiFile = ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
-  gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
-  if gotHiFile
-    then do
 
-      -- Artificial dependency on the .hi file for good measure
-      _ <- use_ GetModificationTime $ toNormalizedFilePath hiFile
+  let noHiFile = do
+          liftIO $ logDebug logger $ T.pack ("Missing or stale interface file: " <> hiFile)
+          pure (Nothing, ([], Nothing))
 
-      r <- liftIO $ loadInterface session hiFile (ms_mod ms)
-
-      case r of
-        Right iface -> do
-          let result = HiFileResult ms iface
-          liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
-          return ([], Just result)
-        Left err -> do
-          let d = ideErrorText f errMsg
-              errMsg = T.pack err
-          liftIO
-            $  logDebug logger
-            $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
-            <> errMsg
-          return ([d], Nothing)
+  if (isNothing $ sequence depHis)
+    then noHiFile
     else do
-      liftIO $ logDebug logger $ T.pack ("Missing or stale interface file for" <> hiFile)
-      pure ([], Nothing)
+      gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
+      if not gotHiFile
+        then noHiFile
+        else do
+          hiVersion  <- use_ GetModificationTime $ toNormalizedFilePath hiFile
+          modVersion <- use_ GetModificationTime f
+          let useHiFile =
+                comparing modificationTime hiVersion modVersion == GT ||
+                -- interfaces for files of interest are always up-to-date aftet typechecking
+                f `elem` filesOfInterest
+          if not useHiFile
+            then noHiFile
+            else do
+              r <- liftIO $ loadInterface session hiFile (ms_mod ms)
+              case r of
+                Right iface -> do
+                  let result = HiFileResult ms iface
+                  liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
+                  return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
+                Left err -> do
+                  let d = ideErrorText f errMsg
+                      errMsg = T.pack err
+                  liftIO
+                    $  logDebug logger
+                    $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
+                    <> errMsg
+                  return (Nothing, ([d], Nothing))
+  where
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
+    -- FIXME this dependency causes unnecessary reloading
     filesOfInterest <- getFilesOfInterest
     let useHiFile =
           -- Interface files do not carry location information, so
