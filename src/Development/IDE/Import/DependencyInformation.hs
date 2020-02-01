@@ -14,6 +14,7 @@ module Development.IDE.Import.DependencyInformation
   , PathIdMap
   , emptyPathIdMap
   , getPathId
+  , lookupPathToId
   , insertImport
   , pathToId
   , idToPath
@@ -21,12 +22,16 @@ module Development.IDE.Import.DependencyInformation
   , modLocationToNormalizedFilePath
   , processDependencyInformation
   , transitiveDeps
+
+  , BootIdMap
+  , insertBootId
   ) where
 
 import Control.DeepSeq
 import Data.Bifunctor
 import Data.Coerce
 import Data.List
+import Data.Tuple.Extra hiding (first, second)
 import Development.IDE.GHC.Orphans()
 import Data.Either
 import Data.Graph
@@ -42,7 +47,6 @@ import qualified Data.Map.Strict as MS
 import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Tuple.Extra (fst3)
 import GHC.Generics (Generic)
 
 import Development.IDE.Types.Diagnostics
@@ -77,7 +81,7 @@ data PathIdMap = PathIdMap
 instance NFData PathIdMap
 
 modLocationToNormalizedFilePath :: ArtifactsLocation -> NormalizedFilePath
-modLocationToNormalizedFilePath (ArtifactsLocation loc) =
+modLocationToNormalizedFilePath (ArtifactsLocation loc _) =
     let (Just filePath) = ml_hs_file loc
     in
     toNormalizedFilePath filePath
@@ -103,6 +107,9 @@ insertImport (FilePathId k) v rawDepInfo = rawDepInfo { rawImports = IntMap.inse
 pathToId :: PathIdMap -> NormalizedFilePath -> FilePathId
 pathToId PathIdMap{pathToIdMap} path = pathToIdMap MS.! path
 
+lookupPathToId :: PathIdMap -> NormalizedFilePath -> Maybe FilePathId
+lookupPathToId PathIdMap{pathToIdMap} path = MS.lookup path pathToIdMap
+
 idToPath :: PathIdMap -> FilePathId -> NormalizedFilePath
 idToPath pathIdMap filePathId = modLocationToNormalizedFilePath $ idToModLocation pathIdMap filePathId
 
@@ -110,10 +117,21 @@ idToModLocation :: PathIdMap -> FilePathId -> ArtifactsLocation
 idToModLocation PathIdMap{idToPathMap} (FilePathId id) = idToPathMap IntMap.! id
 
 
+type BootIdMap = IntMap FilePathId
+
+insertBootId :: FilePathId -> FilePathId -> BootIdMap -> BootIdMap
+insertBootId k = IntMap.insert (getFilePathId k)
+
+
 -- | Unprocessed results that we find by following imports recursively.
 data RawDependencyInformation = RawDependencyInformation
     { rawImports :: !(IntMap (Either ModuleParseError ModuleImports))
     , rawPathIdMap :: !PathIdMap
+    -- The rawBootMap maps the FilePathId of a hs-boot file to its
+    -- corresponding hs file. It is used when topologically sorting as we
+    -- need to add edges between .hs-boot and .hs so that the .hs files
+    -- appear later in the sort.
+    , rawBootMap :: !BootIdMap
     }
 
 pkgDependencies :: RawDependencyInformation -> IntMap (Set InstalledUnitId)
@@ -131,6 +149,8 @@ data DependencyInformation =
     , depPkgDeps :: !(IntMap (Set InstalledUnitId))
     -- ^ For a non-error node, this contains the set of immediate pkg deps.
     , depPathIdMap :: !PathIdMap
+    -- ^ Map from hs-boot file to the corresponding hs file
+    , depBootMap :: !BootIdMap
     } deriving (Show, Generic)
 
 newtype ShowableModuleName =
@@ -208,6 +228,7 @@ processDependencyInformation rawDepInfo@RawDependencyInformation{..} =
     , depModuleNames = IntMap.fromList $ coerce moduleNames
     , depPkgDeps = pkgDependencies rawDepInfo
     , depPathIdMap = rawPathIdMap
+    , depBootMap = rawBootMap
     }
   where resultGraph = buildResultGraph rawImports
         (errorNodes, successNodes) = partitionNodeResults $ IntMap.toList resultGraph
@@ -288,10 +309,12 @@ partitionSCC (CyclicSCC xs:rest) = second (xs:) $ partitionSCC rest
 partitionSCC (AcyclicSCC x:rest) = first (x:)   $ partitionSCC rest
 partitionSCC []                  = ([], [])
 
+
 transitiveDeps :: DependencyInformation -> NormalizedFilePath -> Maybe TransitiveDependencies
 transitiveDeps DependencyInformation{..} file = do
   let !fileId = pathToId depPathIdMap file
   reachableVs <-
+      -- Delete the starting node
       IntSet.delete (getFilePathId fileId) .
       IntSet.fromList . map (fst3 . fromVertex) .
       reachable g <$> toVertex (getFilePathId fileId)
@@ -306,11 +329,19 @@ transitiveDeps DependencyInformation{..} file = do
   let transitiveNamedModuleDeps =
         [ NamedModuleDep (idToPath depPathIdMap (FilePathId fid)) mn ml
         | (fid, ShowableModuleName mn) <- IntMap.toList depModuleNames
-        , let ArtifactsLocation ml = idToPathMap depPathIdMap IntMap.! fid
+        , let ArtifactsLocation ml _ = idToPathMap depPathIdMap IntMap.! fid
         ]
   pure TransitiveDependencies {..}
   where
-    (g, fromVertex, toVertex) = graphFromEdges (map (\(f, fs) -> (f, f, IntSet.toList fs)) $ IntMap.toList depModuleDeps)
+    (g, fromVertex, toVertex) = graphFromEdges edges
+    edges = map (\(f, fs) -> (f, f, IntSet.toList fs ++ boot_edge f)) $ IntMap.toList depModuleDeps
+
+    -- Need to add an edge between the .hs and .hs-boot file if it exists
+    -- so the .hs file gets loaded after the .hs-boot file and the right
+    -- stuff ends up in the HPT. If you don't have this check then GHC will
+    -- fail to work with ghcide.
+    boot_edge f = [getFilePathId f' | Just f' <- [IntMap.lookup f depBootMap]]
+
     vs = topSort g
 
 data TransitiveDependencies = TransitiveDependencies
