@@ -28,6 +28,7 @@ module Development.IDE.GHC.Compat(
     pattern ClassOpSig,
     pattern IEThingWith,
     GHC.ModLocation,
+    Module.addBootSuffix,
     pattern ModLocation,
 
     module GHC
@@ -36,6 +37,7 @@ module Development.IDE.GHC.Compat(
 import StringBuffer
 import DynFlags
 import FieldLabel
+import qualified Module
 
 import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
 import qualified GHC
