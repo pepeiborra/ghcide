@@ -35,6 +35,7 @@ import Development.IDE.GHC.Util
 import qualified GHC.LanguageExtensions.Type as GHC
 import Development.IDE.Types.Options
 import Development.IDE.Types.Location
+import Outputable
 
 import TcRnMonad
 
@@ -66,8 +67,6 @@ import Control.Exception
 import Control.Monad.Extra
 import Control.Monad.Except
 import Control.Monad.Trans.Except
-import           Data.Function
-import           Data.Ord
 import qualified Data.Text as T
 import           Data.IORef
 import           Data.List.Extra
@@ -118,11 +117,14 @@ typecheckModule (IdeDefer defer) hsc depsIn pm = do
         -- Currently GetDependencies returns things in topological order so A comes before B if A imports B.
         -- We need to reverse this as GHC gets very unhappy otherwise and complains about broken interfaces.
         -- Long-term we might just want to change the order returned by GetDependencies
-        deps <- setupEnv' $ reverse depsIn
-        mapM_ (uncurry loadDepModule) (map snd deps)
+        let deps = reverse depsIn
+
+        setupFinderCache deps
 
         let modSummary = pm_mod_summary pm
             dflags = ms_hspp_opts modSummary
+
+        mapM_ (uncurry loadDepModule . snd) deps
         modSummary' <- initPlugins modSummary
         (warnings, tcm) <- withWarnings "typecheck" $ \tweak ->
             GHC.typecheckModule $ enableTopLevelWarnings
@@ -274,19 +276,19 @@ generateAndWriteHiFile hscEnv tc = do
 
 -- | Setup the environment that GHC needs according to our
 -- best understanding (!)
+--
+-- This involves setting up the finder cache and populating the
+-- HPT.
 setupEnv :: GhcMonad m => [(ModSummary, HomeModInfo)] -> m ()
-setupEnv tmsIn = do
-    tms <- setupEnv' tmsIn
+setupEnv tms = do
+    setupFinderCache tms
     -- load dependent modules, which must be in topological order.
     mapM_ (\(ms, hmi) -> loadModuleHome (ms_mod_name ms) hmi) tms
 
-setupEnv' :: GhcMonad m => [(ModSummary, b)] -> m [(ModSummary, b)]
-setupEnv' tmsIn = do
-    -- if both a .hs-boot file and a .hs file appear here, we want to make sure that the .hs file
-    -- takes precedence, so put the .hs-boot file earlier in the list
-    let isSourceFile = (==HsBootFile) . ms_hsc_src
-        tms = sortBy (compare `on` Down . isSourceFile . fst) tmsIn
-
+-- | Initialise the finder cache, dependencies should be topologically
+-- sorted.
+setupFinderCache :: GhcMonad m => [(ModSummary, b)] -> m ()
+setupFinderCache tms = do
     session <- getSession
 
     let mss = map fst tms
@@ -309,12 +311,15 @@ setupEnv' tmsIn = do
     newFinderCacheVar <- liftIO $ newIORef $! newFinderCache
     modifySession $ \s -> s { hsc_FC = newFinderCacheVar }
 
-    return tms
 
 -- | Load a module, quickly. Input doesn't need to be desugared.
 -- A module must be loaded before dependent modules can be typechecked.
 -- This variant of loadModuleHome will *never* cause recompilation, it just
 -- modifies the session.
+--
+-- The order modules are loaded is important when there are hs-boot files.
+-- In particular you should make sure to load the .hs version of a file after the
+-- .hs-boot version.
 loadModuleHome
     :: (GhcMonad m)
     => ModuleName
