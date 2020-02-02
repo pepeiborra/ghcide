@@ -162,10 +162,6 @@ main = do
         let files xs = let n = length xs in if n == 1 then "1 file" else show n ++ " files"
         putStrLn $ "\nCompleted (" ++ files worked ++ " worked, " ++ files failed ++ " failed)"
 
-        putStrLn "\nStep 7/6: Get at point"
-        res <- runActionSync ide $ getDefinition(toNormalizedFilePath "src/Development/IDE/Core/Rules.hs") (Position 110 19)
-        print res
-
         unless (null failed) exitFailure
 
 
