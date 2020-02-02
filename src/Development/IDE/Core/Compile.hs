@@ -21,6 +21,7 @@ module Development.IDE.Core.Compile
   , generateAndWriteHieFile
   , generateAndWriteHiFile
   , loadDepModule
+  , loadModuleHome
   ) where
 
 import Data.ByteString as BS (ByteString, readFile)
@@ -289,7 +290,7 @@ setupEnv tms = do
     setupFinderCache tms
     -- load dependent modules, which must be in topological order.
     modifySession $ \e ->
-      foldl' (\e (ms, hmi) -> loadModuleHome (ms_mod_name ms) hmi e) e tms
+      foldl' (\e (_, hmi) -> loadModuleHome hmi e) e tms
 
 -- | Initialise the finder cache, dependencies should be topologically
 -- sorted.
@@ -327,12 +328,13 @@ setupFinderCache tms = do
 -- In particular you should make sure to load the .hs version of a file after the
 -- .hs-boot version.
 loadModuleHome
-    :: ModuleName
-    -> HomeModInfo
+    :: HomeModInfo
     -> HscEnv
     -> HscEnv
-loadModuleHome mod mod_info e =
-    e { hsc_HPT = addToHpt (hsc_HPT e) mod mod_info }
+loadModuleHome mod_info e =
+    e { hsc_HPT = addToHpt (hsc_HPT e) mod_name mod_info }
+    where
+      mod_name = moduleName $ mi_module $ hm_iface mod_info
 
 -- | Load module interface.
 loadDepModuleIO :: ModIface -> Maybe Linkable -> HscEnv -> IO HscEnv
@@ -341,7 +343,7 @@ loadDepModuleIO iface linkable hsc = do
         let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) mod (HomeModInfo iface details linkable) }
         initIfaceLoad hsc' (typecheckIface iface)
     let mod_info = HomeModInfo iface details linkable
-    return $ loadModuleHome mod mod_info hsc
+    return $ loadModuleHome mod_info hsc
     where
       mod = moduleName $ mi_module iface
 
@@ -470,16 +472,15 @@ parseFileContents customPreprocessor dflags filename contents = do
 loadInterface
   :: HscEnv
   -> ModSummary
-  -> SourceModified
   -> [HiFileResult]
   -> IO (Either String (ModIface))
-loadInterface session ms sourceMod deps = do
+loadInterface session ms deps = do
   let hiFile = ml_hi_file $ ms_location ms
   r <- initIfaceLoad session $ readIface (ms_mod ms) hiFile
   case r of
     Maybes.Succeeded iface -> do
       session' <- foldM (\e d -> loadDepModuleIO (hirModIface d) Nothing e) session deps
-      (reason, iface') <- checkOldIface session' ms sourceMod (Just iface)
+      (reason, iface') <- checkOldIface session' ms SourceUnmodified (Just iface)
       case iface' of
         Just iface' -> return $ Right iface'
         Nothing -> return $ Left (showReason reason)
