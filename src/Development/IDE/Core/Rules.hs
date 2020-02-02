@@ -448,25 +448,10 @@ getHieFileRule = define $ \(GetHieFile hie_f) f -> do
   liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
   return ([], Just hf)
 
-{- Recompilation checking for interface files
-
-   GHC comes with plenty of logic for deciding whether a .hi file should be up to date,
-   but we choose not to use it since it would be duplicating efforts with the Shake graph.
-   Moreover, since we load every .hi file in isolation, it would be a lot of wasted work to
-   set up the `RnM` environment every time (and I have no clue how to do it properly).
-
-   Instead we rely on Shake to keep things up-to-date. An interface file is considered fresh if:
-     1. Its timestamp is more recent than the source module
-     2. All its dependencies are fresh
- -}
-
 getHiFileRule :: Rules ()
 getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
   logger  <- actionLogger
-  -- FIXME this dependency causes unnecessary reloading
-  filesOfInterest <- getFilesOfInterest
-
   -- get all dependencies interface files, to check for freshness
   (deps,_)<- use_ GetLocatedImports f
   depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
@@ -480,41 +465,36 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
                 _ -> ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
 
-  let noHiFile = do
-          liftIO $ logDebug logger $ T.pack ("Missing or stale interface file: " <> hiFile)
+  case sequence depHis of
+    Nothing -> do
+          liftIO $ logDebug logger $ T.pack ("Missing dependencies for interface file: " <> hiFile)
           pure (Nothing, ([], Nothing))
-
-  if (isNothing $ sequence depHis)
-    then noHiFile
-    else do
+    Just deps -> do
       gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
       if not gotHiFile
-        then noHiFile
+        then do
+          liftIO $ logDebug logger $ T.pack ("Missing interface file: " <> hiFile)
+          pure (Nothing, ([], Nothing))
         else do
           hiVersion  <- use_ GetModificationTime $ toNormalizedFilePath hiFile
           modVersion <- use_ GetModificationTime f
-          let useHiFile =
-                comparing modificationTime hiVersion modVersion == GT ||
-                -- interfaces for files of interest are always up-to-date aftet typechecking
-                f `elem` filesOfInterest
-          if not useHiFile
-            then noHiFile
-            else do
-              r <- liftIO $ loadInterface session hiFile (ms_mod ms)
-              case r of
-                Right iface -> do
-                  let result = HiFileResult ms iface
-                  liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
-                  return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
-                Left err -> do
-                  let d = ideErrorText f errMsg
-                      errMsg = T.pack err
-                  liftIO
-                    $  logDebug logger
-                    $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
-                    <> errMsg
-                  return (Nothing, ([d], Nothing))
-  where
+          let sourceModified
+                | GT <- comparing modificationTime hiVersion modVersion = SourceUnmodified
+                | otherwise = SourceModified
+          r <- liftIO $ loadInterface session ms sourceModified deps
+          case r of
+            Right iface -> do
+              let result = HiFileResult ms iface
+              liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
+              return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
+            Left err -> do
+              let d = ideErrorText f errMsg
+                  errMsg = T.pack err
+              liftIO
+                $  logDebug logger
+                $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
+                <> errMsg
+              return (Nothing, ([d], Nothing))
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do

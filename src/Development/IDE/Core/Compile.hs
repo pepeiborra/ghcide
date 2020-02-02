@@ -120,6 +120,9 @@ typecheckModule (IdeDefer defer) hsc depsIn pm = do
         let deps = reverse depsIn
 
         setupFinderCache deps
+        hsc <- getSession
+        hsc' <- liftIO $ foldM (\e (_, (iface,bc)) -> loadDepModuleIO iface bc e) hsc deps
+        setSession hsc'
 
         let modSummary = pm_mod_summary pm
             dflags = ms_hspp_opts modSummary
@@ -283,7 +286,8 @@ setupEnv :: GhcMonad m => [(ModSummary, HomeModInfo)] -> m ()
 setupEnv tms = do
     setupFinderCache tms
     -- load dependent modules, which must be in topological order.
-    mapM_ (\(ms, hmi) -> loadModuleHome (ms_mod_name ms) hmi) tms
+    modifySession $ \e ->
+      foldl' (\e (ms, hmi) -> loadModuleHome (ms_mod_name ms) hmi e) e tms
 
 -- | Initialise the finder cache, dependencies should be topologically
 -- sorted.
@@ -321,26 +325,29 @@ setupFinderCache tms = do
 -- In particular you should make sure to load the .hs version of a file after the
 -- .hs-boot version.
 loadModuleHome
-    :: (GhcMonad m)
-    => ModuleName
+    :: ModuleName
     -> HomeModInfo
-    -> m ()
-loadModuleHome mod mod_info = modifySession $ \e ->
+    -> HscEnv
+    -> HscEnv
+loadModuleHome mod mod_info e =
     e { hsc_HPT = addToHpt (hsc_HPT e) mod mod_info }
 
 -- | Load module interface.
-loadDepModule :: GhcMonad m => ModIface -> Maybe Linkable -> m ()
-loadDepModule iface linkable = do
-    hsc <- getSession
+loadDepModuleIO :: ModIface -> Maybe Linkable -> HscEnv -> IO HscEnv
+loadDepModuleIO iface linkable hsc = do
     details <- liftIO $ fixIO $ \details -> do
         let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) mod (HomeModInfo iface details linkable) }
         initIfaceLoad hsc' (typecheckIface iface)
     let mod_info = HomeModInfo iface details linkable
-    loadModuleHome mod mod_info
+    return $ loadModuleHome mod mod_info hsc
     where
       mod = moduleName $ mi_module iface
 
-
+loadDepModule :: GhcMonad m => ModIface -> Maybe Linkable -> m ()
+loadDepModule iface linkable = do
+  e <- getSession
+  e' <- liftIO $ loadDepModuleIO iface linkable e
+  setSession e'
 
 -- | GhcMonad function to chase imports of a module given as a StringBuffer. Returns given module's
 -- name and its imports.
@@ -457,19 +464,31 @@ parseFileContents customPreprocessor dflags filename contents = do
 
 -- | Retuns an up-to-date module interface if available.
 --   Assumes file exists.
+--   Requires the 'HscEnv' to be set up with dependencies
 loadInterface
   :: HscEnv
-  -> FilePath
-  -> Module
-  -> IO (Either String ModIface)
-loadInterface session hiFile mod = do
-  r <- initIfaceLoad session $ readIface mod hiFile
+  -> ModSummary
+  -> SourceModified
+  -> [HiFileResult]
+  -> IO (Either String (ModIface))
+loadInterface session ms sourceMod deps = do
+  let hiFile = ml_hi_file $ ms_location ms
+  r <- initIfaceLoad session $ readIface (ms_mod ms) hiFile
   case r of
     Maybes.Succeeded iface -> do
-      return $ Right iface
+      session' <- foldM (\e d -> loadDepModuleIO (hirModIface d) Nothing e) session deps
+      (reason, iface') <- checkOldIface session' ms sourceMod (Just iface)
+      case iface' of
+        Just iface' -> return $ Right iface'
+        Nothing -> return $ Left (showReason reason)
     Maybes.Failed err -> do
       let errMsg = showSDoc (hsc_dflags session) err
       return $ Left errMsg
+
+showReason :: RecompileRequired -> String
+showReason MustCompile = "Stale"
+showReason (RecompBecause reason) = "Stale (" ++ reason ++ ")"
+showReason UpToDate = "Up to date"
 
 loadHieFile :: FilePath -> IO GHC.HieFile
 loadHieFile f = do
