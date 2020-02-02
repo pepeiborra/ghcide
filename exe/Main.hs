@@ -14,6 +14,9 @@ import Control.Concurrent.Extra
 import Control.Exception
 import Control.Monad.Extra
 import Control.Monad.IO.Class
+import qualified Crypto.Hash.SHA1 as H
+import qualified Data.ByteString.Char8 as B
+import Data.ByteString.Base16
 import Data.Default
 import System.Time.Extra
 import Development.IDE.Core.FileStore
@@ -55,9 +58,20 @@ import           DynFlags
 import HIE.Bios.Environment
 import HIE.Bios
 
+-- Prefix for the cache path
+cacheDir :: String
+cacheDir = "ghcide"
+
 -- Set the GHC libdir to the nix libdir if it's present.
 getLibdir :: IO FilePath
 getLibdir = fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"
+
+getCacheDir :: [String] -> IO FilePath
+getCacheDir opts = getXdgDirectory XdgCache (cacheDir </> opts_hash)
+    where
+        -- Create a unique folder per set of different GHC options, assuming that each different set of
+        -- GHC options will create incompatible interface files.
+        opts_hash = B.unpack $ encode $ H.finalize $ H.updates H.init (map B.pack opts)
 
 ghcideVersion :: IO String
 ghcideVersion = do
@@ -148,6 +162,10 @@ main = do
         let files xs = let n = length xs in if n == 1 then "1 file" else show n ++ " files"
         putStrLn $ "\nCompleted (" ++ files worked ++ " worked, " ++ files failed ++ " failed)"
 
+        putStrLn "\nStep 7/6: Get at point"
+        res <- runActionSync ide $ getDefinition(toNormalizedFilePath "src/Development/IDE/Core/Rules.hs") (Position 110 19)
+        print res
+
         unless (null failed) exitFailure
 
 
@@ -187,10 +205,15 @@ cradleToSession cradle = do
         -- That will require some more changes.
         CradleNone -> fail "'none' cradle is not yet supported"
     libdir <- getLibdir
+
+    cacheDir <- getCacheDir opts
+
     env <- runGhc (Just libdir) $ do
         dflags <- getSessionDynFlags
         (dflags', _targets) <- addCmdOpts opts dflags
         _ <- setSessionDynFlags $
+             writeInterfaceFiles (Just cacheDir) $
+             setHieDir cacheDir $
              setIgnoreInterfacePragmas $
              disableOptimisation dflags'
         getSession
@@ -203,6 +226,15 @@ setIgnoreInterfacePragmas df =
 
 disableOptimisation :: DynFlags -> DynFlags
 disableOptimisation df = updOptLevel 0 df
+
+writeInterfaceFiles :: Maybe FilePath -> DynFlags -> DynFlags
+writeInterfaceFiles Nothing df = df
+writeInterfaceFiles (Just hi_dir) df = setHiDir hi_dir (gopt_set df Opt_WriteInterface)
+
+setHiDir :: FilePath -> DynFlags -> DynFlags
+setHiDir f d =
+    -- override user settings to avoid conflicts leading to recompilation
+    d { hiDir      = Just f}
 
 loadSession :: FilePath -> IO (FilePath -> Action HscEnvEq)
 loadSession dir = do

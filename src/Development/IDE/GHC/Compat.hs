@@ -30,7 +30,8 @@ module Development.IDE.GHC.Compat(
 
     module GHC,
 
-    supportsHieFiles
+    supportsHieFiles,
+    setHieDir
     ) where
 
 
@@ -162,4 +163,13 @@ pattern ModLocation a b c <-
     GHC.ModLocation a b c _ where ModLocation a b c = GHC.ModLocation a b c ""
 #else
     GHC.ModLocation a b c where ModLocation a b c = GHC.ModLocation a b c
+#endif
+
+setHieDir :: FilePath -> DynFlags -> DynFlags
+setHieDir f d =
+#if MIN_GHC_API_VERSION(8,6,0)
+    -- respect user settings as no risk of recompilation
+    d { hieDir     = hieDir d <> Just f}
+#else
+    d
 #endif
