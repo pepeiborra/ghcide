@@ -277,7 +277,11 @@ generateAndWriteHiFile hscEnv tc = do
     writeIfaceFile dflags fp modIface
   where
     modIface = hm_iface $ tmrModInfo tc
-    targetPath = ml_hi_file $ ms_location $ tmrModSummary tc
+    modSummary = tmrModSummary tc
+    targetPath = withBootSuffix $ ml_hi_file $ ms_location $ tmrModSummary tc
+    withBootSuffix = case ms_hsc_src modSummary of
+                HsBootFile -> addBootSuffix
+                _ -> id
     dflags = hsc_dflags hscEnv
 
 -- | Setup the environment that GHC needs according to our
