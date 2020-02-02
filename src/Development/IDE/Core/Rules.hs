@@ -27,6 +27,7 @@ module Development.IDE.Core.Rules(
 
 import Fingerprint
 
+import Control.Exception
 import Data.Binary
 import Data.Bifunctor (second)
 import Control.Monad.Extra
@@ -358,7 +359,11 @@ typeCheckRule = define $ \TypeCheck file -> do
   whenJust (snd res) $ \tcm -> do
     (_, contents) <- getFileContents file
     liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString <$> contents) (tmrModule tcm)
+      `catch` \(e::IOException) -> do
+        logDebug logger $ T.pack $ "Error saving .hie file: " <> show e
     liftIO $ generateAndWriteHiFile hsc tcm
+      `catch` \(e::IOException) -> do
+        logDebug logger $ T.pack $ "Error saving .hi file: " <> show e
 
   return res
  where
