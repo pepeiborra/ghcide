@@ -479,7 +479,9 @@ loadInterface
   -> [HiFileResult]
   -> IO (Either String (ModIface))
 loadInterface session ms deps = do
-  let hiFile = ml_hi_file $ ms_location ms
+  let hiFile = case ms_hsc_src ms of
+                HsBootFile -> addBootSuffix (ml_hi_file $ ms_location ms)
+                _ -> ml_hi_file $ ms_location ms
   r <- initIfaceLoad session $ readIface (ms_mod ms) hiFile
   case r of
     Maybes.Succeeded iface -> do
