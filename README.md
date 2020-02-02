@@ -69,13 +69,7 @@ If you can't get `ghcide` working outside the editor, see [this setup troublesho
 `ghcide` has been designed to handle projects with hundreds or thousands of modules. If `ghci` can handle it, then `ghcide` should be able to handle it too provided the following conditions are met:
 
 1. Use GHC >= 8.8
-2. Enable `.hie` file generation:
-
-```
-   ghc-options: --fwrite-ide-info
-```
-
-3. Build your project before loading it in `ghcide`
+2. Give `ghcide` a chance to load all the project modules and generate interface files
 
 ### Using with VS Code
 
