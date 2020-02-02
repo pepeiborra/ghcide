@@ -50,6 +50,7 @@ import qualified Data.Map.Strict as Map
 
 import GHC hiding (def)
 import qualified GHC.Paths
+import           DynFlags
 
 import HIE.Bios.Environment
 import HIE.Bios
@@ -188,14 +189,20 @@ cradleToSession cradle = do
     libdir <- getLibdir
     env <- runGhc (Just libdir) $ do
         dflags <- getSessionDynFlags
-        -- Perhaps need to enable -fignore-interface-pragmas to not
-        -- recompie due to changes to unfoldings and so on
         (dflags', _targets) <- addCmdOpts opts dflags
-        _ <- setSessionDynFlags dflags'
+        _ <- setSessionDynFlags $
+             setIgnoreInterfacePragmas $
+             disableOptimisation dflags'
         getSession
     initDynLinker env
     newHscEnvEq env
 
+setIgnoreInterfacePragmas :: DynFlags -> DynFlags
+setIgnoreInterfacePragmas df =
+    gopt_set (gopt_set df Opt_IgnoreInterfacePragmas) Opt_IgnoreOptimChanges
+
+disableOptimisation :: DynFlags -> DynFlags
+disableOptimisation df = updOptLevel 0 df
 
 loadSession :: FilePath -> IO (FilePath -> Action HscEnvEq)
 loadSession dir = do
