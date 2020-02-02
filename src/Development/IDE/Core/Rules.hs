@@ -483,23 +483,26 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
         else do
           hiVersion  <- use_ GetModificationTime $ toNormalizedFilePath hiFile
           modVersion <- use_ GetModificationTime f
-          let sourceModified
-                | GT <- comparing modificationTime hiVersion modVersion = SourceUnmodified
-                | otherwise = SourceModified
-          r <- liftIO $ loadInterface session ms sourceModified deps
-          case r of
-            Right iface -> do
-              let result = HiFileResult ms iface
-              liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
-              return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
-            Left err -> do
-              let d = ideErrorText f errMsg
-                  errMsg = T.pack err
-              liftIO
-                $  logDebug logger
-                $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
-                <> errMsg
-              return (Nothing, ([d], Nothing))
+          let sourceModified = LT == comparing modificationTime hiVersion modVersion
+          if sourceModified
+            then do
+              liftIO $ logDebug logger $ T.pack ("Stale interface file: " <> hiFile <> " " <> show hiVersion <> " " <> show modVersion)
+              pure (Nothing, ([], Nothing))
+            else do
+              r <- liftIO $ loadInterface session ms deps
+              case r of
+                Right iface -> do
+                  let result = HiFileResult ms iface
+                  liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
+                  return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
+                Left err -> do
+                  let d = ideErrorText f errMsg
+                      errMsg = T.pack err
+                  liftIO
+                    $  logDebug logger
+                    $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
+                    <> errMsg
+                  return (Nothing, ([d], Nothing))
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
