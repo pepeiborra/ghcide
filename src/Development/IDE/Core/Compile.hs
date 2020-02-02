@@ -249,7 +249,9 @@ mkTcModuleResult tcm = do
 
 atomicFileUpdate :: FilePath -> (FilePath -> IO a) -> IO ()
 atomicFileUpdate targetPath write = do
-  (tempFilePath, cleanUp) <- newTempFileWithin (takeDirectory targetPath)
+  let dir = takeDirectory targetPath
+  createDirectoryIfMissing True dir
+  (tempFilePath, cleanUp) <- newTempFileWithin dir
   (write tempFilePath >> renameFile tempFilePath targetPath) `onException` cleanUp
 
 generateAndWriteHieFile :: HscEnv -> Maybe ByteString -> TypecheckedModule -> IO ()
