@@ -29,7 +29,7 @@ import Fingerprint
 
 import Data.Binary
 import Data.Bifunctor (second)
-import Control.Monad
+import Control.Monad.Extra
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Development.IDE.Core.Compile
@@ -61,8 +61,6 @@ import Development.IDE.Types.Logger (logDebug)
 import Development.IDE.Spans.Type
 
 import qualified GHC.LanguageExtensions as LangExt
-import           UniqSupply
-import NameCache
 import HscTypes
 import DynFlags (xopt)
 import GHC.Generics(Generic)
@@ -115,9 +113,35 @@ getDefinition :: NormalizedFilePath -> Position -> Action (Maybe Location)
 getDefinition file pos = fmap join $ runMaybeT $ do
     opts <- lift getIdeOptions
     spans <- useE GetSpanInfo file
-    pkgState <- hscEnv <$> useE GhcSession file
-    let getHieFile x = useNoFile (GetHieFile x)
-    lift $ AtPoint.gotoDefinition getHieFile opts pkgState (spansExprs spans) pos
+    lift $ AtPoint.gotoDefinition (getHieFile opts file) opts (spansExprs spans) pos
+
+getHieFile
+  :: IdeOptions
+  -> NormalizedFilePath -- ^ file we're editing
+  -> Module -- ^ module dep we want info for
+  -> Action (Maybe (HieFile, FilePath)) -- ^ hie stuff for the module
+getHieFile IdeOptions {..} file mod = do
+  TransitiveDependencies {transitiveNamedModuleDeps} <- use_ GetDependencies file
+  pkgState  <- hscEnv <$> use_ GhcSession file
+  case find (\x -> nmdModuleName x == moduleName mod) transitiveNamedModuleDeps of
+    Just NamedModuleDep{nmdModLocation=ml} ->
+      case ml_hs_file ml of
+        Just modPath -> do
+          hieFile <- use GetHieFile (toNormalizedFilePath modPath)
+          return $ (, modPath) <$> hieFile
+        _ -> return Nothing
+    _ -> do
+      let unitId = moduleUnitId mod
+      case lookupPackageConfig unitId pkgState of
+        Just pkgConfig -> do
+          hieFile <- liftIO $ optLocateHieFile optPkgLocationOpts pkgConfig mod
+          path    <- liftIO $ optLocateSrcFile optPkgLocationOpts pkgConfig mod
+          case (hieFile, path) of
+            (Just hiePath, Just modPath) -> do
+              hieFile <- useNoFile (GetPackageHieFile hiePath)
+              return $ (, modPath) <$> hieFile
+            _ -> return Nothing
+        _ -> return Nothing
 
 -- | Parse the contents of a daml file.
 getParsedModule :: NormalizedFilePath -> Action (Maybe ParsedModule)
@@ -359,13 +383,32 @@ loadGhcSession = do
         opts <- getIdeOptions
         return ("" <$ optShakeFiles opts, ([], Just val))
 
+getPackageHieFileRule :: Rules ()
+getPackageHieFileRule =
+    defineNoFile $ \(GetPackageHieFile f) -> do
+    liftIO $ loadHieFile f
 
 getHieFileRule :: Rules ()
-getHieFileRule =
-    defineNoFile $ \(GetHieFile f) -> do
-        u <- liftIO $ mkSplitUniqSupply 'a'
-        let nameCache = initNameCache u []
-        liftIO $ fmap (hie_file_result . fst) $ readHieFile nameCache f
+getHieFileRule = define $ \GetHieFile f -> do
+  logger <- actionLogger
+  pm <- use_ GetParsedModule f
+  let normal_hie_f = toNormalizedFilePath hie_f
+      hie_f = ml_hie_file $ ms_location $ pm_mod_summary pm
+  mbHieTimestamp <- use GetModificationTime normal_hie_f
+  srcTimestamp   <- use_ GetModificationTime f
+  case (mbHieTimestamp, srcTimestamp) of
+    (Just hie, src)
+      | comparing modificationTime hie src == GT -> pure ()
+    _ -> do
+      if isJust mbHieTimestamp
+        then liftIO $  logDebug logger $  T.pack $  "regenerating stale .hie file: " <> hie_f
+        else liftIO $  logDebug logger $  T.pack $  "generating missing .hie file: " <> hie_f
+      -- typecheck generates a .hie file as a side effect
+      void $ use_ TypeCheck f
+  hf <- liftIO $ loadHieFile hie_f
+  liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
+  return ([], Just hf)
+
 
 getHiFileRule :: Rules ()
 getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
@@ -448,6 +491,7 @@ mainRule = do
     generateCoreRule
     generateByteCodeRule
     loadGhcSession
+    getPackageHieFileRule
     getHieFileRule
     getHiFileRule
     getModIfaceRule

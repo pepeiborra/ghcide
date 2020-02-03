@@ -12,6 +12,9 @@ module Development.IDE.GHC.Compat(
     mkHieFile,
     writeHieFile,
     readHieFile,
+#if !MIN_GHC_API_VERSION(8,8,0)
+    ml_hie_file,
+#endif
     hPutStringBuffer,
     includePathsGlobal,
     includePathsQuote,
@@ -27,7 +30,7 @@ module Development.IDE.GHC.Compat(
     pattern ModLocation,
 
     module GHC,
-    supportsHieFiles
+    supportsHieFiles,
     ) where
 
 import StringBuffer
@@ -69,6 +72,9 @@ writeHieFile _ _ = return ()
 
 readHieFile :: NameCache -> FilePath -> IO (HieFileResult, ())
 readHieFile _ _ = return (HieFileResult (HieFile () []), ())
+
+ml_hie_file :: GHC.ModLocation -> FilePath
+ml_hie_file _ = ""
 
 data HieFile = HieFile {hie_module :: (), hie_exports :: [AvailInfo]}
 data HieFileResult = HieFileResult { hie_file_result :: HieFile }
