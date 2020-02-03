@@ -18,6 +18,7 @@ module Development.IDE.Core.Compile
   , generateByteCode
   , loadInterface
   , loadDepModule
+  , loadHieFile
   , loadModuleHome
   ) where
 
@@ -43,7 +44,7 @@ import           Lexer
 import ErrUtils
 
 import           Finder
-import qualified GHC
+import qualified Development.IDE.GHC.Compat     as GHC
 import           GhcMonad
 import           GhcPlugins                     as GHC hiding (fst3, (<>))
 import qualified HeaderInfo                     as Hdr
@@ -51,6 +52,7 @@ import           HscMain                        (hscInteractive)
 import           LoadIface                      (readIface)
 import qualified Maybes
 import           MkIface
+import           NameCache
 import           StringBuffer                   as SB
 import           TcRnMonad (initIfaceLoad)
 import           TcIface                        (typecheckIface)
@@ -68,7 +70,7 @@ import           Data.Maybe
 import           Data.Tuple.Extra
 import qualified Data.Map.Strict                          as Map
 import           System.FilePath
-import           System.IO
+import           System.IO.Extra
 
 
 -- | Given a string buffer, return the string (after preprocessing) and the 'ParsedModule'.
@@ -443,3 +445,9 @@ showReason :: RecompileRequired -> String
 showReason MustCompile = "Stale"
 showReason (RecompBecause reason) = "Stale (" ++ reason ++ ")"
 showReason UpToDate = "Up to date"
+
+loadHieFile :: FilePath -> IO GHC.HieFile
+loadHieFile f = do
+        u <- mkSplitUniqSupply 'a'
+        let nameCache = initNameCache u []
+        fmap (GHC.hie_file_result . fst) $ GHC.readHieFile nameCache f
