@@ -208,7 +208,12 @@ cradleToSession cradle = do
         dflags <- getSessionDynFlags
         (dflags', _targets) <- addCmdOpts opts dflags
         _ <- setSessionDynFlags $
-             writeInterfaceFiles (Just cacheDir) $
+             -- disabled, generated directly by ghcide instead
+             flip gopt_unset Opt_WriteInterface $
+             -- disabled, generated directly by ghcide instead
+             -- also, it can confuse the interface stale check
+             flip gopt_unset Opt_WriteHie $
+             setHiDir cacheDir $
              setHieDir cacheDir $
              setIgnoreInterfacePragmas $
              disableOptimisation dflags'
@@ -222,10 +227,6 @@ setIgnoreInterfacePragmas df =
 
 disableOptimisation :: DynFlags -> DynFlags
 disableOptimisation df = updOptLevel 0 df
-
-writeInterfaceFiles :: Maybe FilePath -> DynFlags -> DynFlags
-writeInterfaceFiles Nothing df = df
-writeInterfaceFiles (Just hi_dir) df = setHiDir hi_dir (gopt_set df Opt_WriteInterface)
 
 setHiDir :: FilePath -> DynFlags -> DynFlags
 setHiDir f d =
