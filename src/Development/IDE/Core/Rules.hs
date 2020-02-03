@@ -356,14 +356,15 @@ typeCheckRule = define $ \TypeCheck file -> do
 
   res <- liftIO $ typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
 
-  whenJust (snd res) $ \tcm -> do
-    (_, contents) <- getFileContents file
-    liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString <$> contents) (tmrModule tcm)
-      `catch` \(e::IOException) -> do
-        logDebug logger $ T.pack $ "Error saving .hie file: " <> show e
-    liftIO $ generateAndWriteHiFile hsc tcm
-      `catch` \(e::IOException) -> do
-        logDebug logger $ T.pack $ "Error saving .hi file: " <> show e
+  when supportsHieFiles $
+    whenJust (snd res) $ \tcm -> do
+      (_, contents) <- getFileContents file
+      liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString <$> contents) (tmrModule tcm)
+        `catch` \(e::IOException) -> do
+          logDebug logger $ T.pack $ "Error saving .hie file: " <> show e
+      liftIO $ generateAndWriteHiFile hsc tcm
+        `catch` \(e::IOException) -> do
+          logDebug logger $ T.pack $ "Error saving .hi file: " <> show e
 
   return res
  where
