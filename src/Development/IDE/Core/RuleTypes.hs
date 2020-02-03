@@ -106,6 +106,10 @@ type instance RuleResult GetHiFile = HiFileResult
 -- | Get a module interface, either from an interface file or a typechecked module
 type instance RuleResult GetModIface = HiFileResult
 
+-- | Generate a ModSummary that has enough information to be used to get .hi and .hie files.
+-- without needing to parse the entire source
+type instance RuleResult GetModSummary = ModSummary
+
 data GetParsedModule = GetParsedModule
     deriving (Eq, Show, Typeable, Generic)
 instance Hashable GetParsedModule
@@ -194,3 +198,10 @@ data GetModIface = GetModIface
 instance Hashable GetModIface
 instance NFData   GetModIface
 instance Binary   GetModIface
+
+data GetModSummary = GetModSummary
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable GetModSummary
+instance NFData   GetModSummary
+instance Binary   GetModSummary
+
