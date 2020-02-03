@@ -127,9 +127,9 @@ getHieFile IdeOptions {..} file mod = do
   pkgState  <- hscEnv <$> use_ GhcSession file
   case find (\x -> nmdModuleName x == moduleName mod) transitiveNamedModuleDeps of
     Just NamedModuleDep{nmdModLocation=ml} ->
-      case (ml_hie_file ml, ml_hs_file ml) of
-        (hiePath, Just modPath) -> do
-          hieFile <- use (GetHieFile hiePath) (toNormalizedFilePath modPath)
+      case ml_hs_file ml of
+        Just modPath -> do
+          hieFile <- use GetHieFile (toNormalizedFilePath modPath)
           return $ (, modPath) <$> hieFile
         _ -> return Nothing
     _ -> do
@@ -425,9 +425,11 @@ getPackageHieFileRule =
     liftIO $ loadHieFile f
 
 getHieFileRule :: Rules ()
-getHieFileRule = define $ \(GetHieFile hie_f) f -> do
+getHieFileRule = define $ \GetHieFile f -> do
   logger <- actionLogger
+  pm <- use_ GetParsedModule f
   let normal_hie_f = toNormalizedFilePath hie_f
+      hie_f = ml_hie_file $ ms_location $ pm_mod_summary pm
   mbHieTimestamp <- use GetModificationTime $ normal_hie_f
   srcTimestamp   <- use_ GetModificationTime f
   case (mbHieTimestamp, srcTimestamp) of

@@ -177,7 +177,7 @@ instance Binary   GetPackageHieFile
 -- In this case we embed the filepath for the hie file.
 -- The filepath of the source file (associated with the Shake key)
 -- is used to track staleness.
-data GetHieFile = GetHieFile FilePath
+data GetHieFile = GetHieFile
     deriving (Eq, Show, Typeable, Generic)
 instance Hashable GetHieFile
 instance NFData   GetHieFile
