@@ -6,22 +6,25 @@ module Development.IDE.GHC.Util(
     -- * HcsEnv and environment
     HscEnvEq, hscEnv, newHscEnvEq,
     modifyDynFlags,
+    evalGhcEnv,
     runGhcEnv,
     -- * GHC wrappers
     prettyPrint,
     lookupPackageConfig,
+    textToStringBuffer,
+    stringBufferToByteString,
     moduleImportPath,
     cgGutsToCoreModule,
     fingerprintToBS,
     fingerprintFromStringBuffer,
     -- * General utilities
-    textToStringBuffer,
     readFileUtf8,
     hDuplicateTo',
     ) where
 
 import Control.Concurrent
 import Data.List.Extra
+import Data.ByteString.Internal (ByteString(..))
 import Data.Maybe
 import Data.Typeable
 import qualified Data.ByteString.Internal as BS
@@ -82,6 +85,8 @@ lookupPackageConfig unitId env =
 textToStringBuffer :: T.Text -> StringBuffer
 textToStringBuffer = stringToStringBuffer . T.unpack
 
+stringBufferToByteString :: StringBuffer -> ByteString
+stringBufferToByteString StringBuffer{..} = PS buf cur len
 
 -- | Pretty print a GHC value using 'unsafeGlobalDynFlags '.
 prettyPrint :: Outputable a => a -> String
@@ -89,15 +94,21 @@ prettyPrint = showSDoc unsafeGlobalDynFlags . ppr
 
 -- | Run a 'Ghc' monad value using an existing 'HscEnv'. Sets up and tears down all the required
 --   pieces, but designed to be more efficient than a standard 'runGhc'.
-runGhcEnv :: HscEnv -> Ghc a -> IO a
-runGhcEnv env act = do
+runGhcEnv :: HscEnv -> Ghc b -> IO b
+runGhcEnv env act = snd <$> evalGhcEnv env act
+
+-- | Run a 'Ghc' monad value using an existing 'HscEnv'. Sets up and tears down all the required
+--   pieces, but designed to be more efficient than a standard 'runGhc'.
+evalGhcEnv :: HscEnv -> Ghc a -> IO (HscEnv, a)
+evalGhcEnv env act = do
     filesToClean <- newIORef emptyFilesToClean
     dirsToClean <- newIORef mempty
     let dflags = (hsc_dflags env){filesToClean=filesToClean, dirsToClean=dirsToClean, useUnicode=True}
     ref <- newIORef env{hsc_dflags=dflags}
-    unGhc act (Session ref) `finally` do
+    res <- unGhc act (Session ref) `finally` do
         cleanTempFiles dflags
         cleanTempDirs dflags
+    (,res) <$> readIORef ref
 
 -- | Given a module location, and its parse tree, figure out what is the include directory implied by it.
 --   For example, given the file @\/usr\/\Test\/Foo\/Bar.hs@ with the module name @Foo.Bar@ the directory

@@ -37,11 +37,11 @@ import StringBuffer
 import DynFlags
 import FieldLabel
 
-import qualified GHC
 import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
+import qualified GHC
 
 #if MIN_GHC_API_VERSION(8,8,0)
-import HieAst
+import Development.IDE.GHC.HieAst
 import HieBin
 import HieTypes
 
@@ -49,6 +49,7 @@ supportsHieFiles :: Bool
 supportsHieFiles = True
 
 #else
+import Data.ByteString (ByteString)
 import GhcPlugins hiding (ModLocation)
 import NameCache
 import Avail
@@ -64,8 +65,8 @@ hPutStringBuffer hdl (StringBuffer buf len cur)
              hPutBuf hdl ptr len
 #endif
 
-mkHieFile :: ModSummary -> TcGblEnv -> RenamedSource -> Hsc HieFile
-mkHieFile _ _ _ = return (HieFile () [])
+mkHieFile :: ModSummary -> TcGblEnv -> RenamedSource -> ByteString -> Hsc HieFile
+mkHieFile _ _ _ _ = return (HieFile () [])
 
 writeHieFile :: FilePath -> HieFile -> IO ()
 writeHieFile _ _ = return ()
