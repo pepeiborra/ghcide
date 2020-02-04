@@ -12,6 +12,7 @@ data Arguments = Arguments
     ,argFiles :: [FilePath]
     ,argsVersion :: Bool
     ,argsShakeProfiling :: Maybe FilePath
+    ,argsUseInterfaces :: Bool
     }
 
 getArguments :: IO Arguments
@@ -29,3 +30,4 @@ arguments = Arguments
       <*> many (argument str (metavar "FILES/DIRS..."))
       <*> switch (long "version" <> help "Show ghcide and GHC versions")
       <*> optional (strOption $ long "shake-profiling" <> metavar "DIR" <> help "Dump profiling reports to this directory")
+      <*> switch (long "use-interface-files" <> help "Use interface files (.hi) in GHC >8.8 to reduce space usage")

@@ -116,6 +116,7 @@ main = do
             let options = (defaultIdeOptions $ return session)
                     { optReportProgress = clientSupportsProgress caps
                     , optShakeProfiling = argsShakeProfiling
+                    , optUseInterfaces = argsUseInterfaces
                     }
             initialise caps (mainRule >> pluginRules plugins >> action kick) getLspId event (logger minBound) options vfs
     else do

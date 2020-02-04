@@ -502,7 +502,9 @@ getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
     -- FIXME this dependency causes unnecessary reloading
     filesOfInterest <- getFilesOfInterest
+    opt <- getIdeOptions
     let useHiFile =
+          optUseInterfaces opt &&
           -- Interface files do not carry location information, so
           -- never use interface files if .hie files are not available
           supportsHieFiles &&

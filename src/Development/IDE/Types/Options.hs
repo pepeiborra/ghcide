@@ -55,6 +55,8 @@ data IdeOptions = IdeOptions
     --   features such as diagnostics and go-to-definition, in
     --   situations in which they would become unavailable because of
     --   the presence of type errors, holes or unbound variables.
+  , optUseInterfaces :: Bool
+    -- ^ whether to use .hi files to speed up typechecking and save memory
   }
 
 data IdePreprocessedSource = IdePreprocessedSource
@@ -86,6 +88,7 @@ defaultIdeOptions session = IdeOptions
     ,optLanguageSyntax = "haskell"
     ,optNewColonConvention = False
     ,optDefer = IdeDefer True
+    ,optUseInterfaces = False
     }
 
 
