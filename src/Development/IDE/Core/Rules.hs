@@ -29,7 +29,7 @@ import Fingerprint
 
 import Control.Exception
 import Data.Binary
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Control.Monad.Extra
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
@@ -483,8 +483,8 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
               liftIO $ logDebug logger $ T.pack ("Stale interface file: " <> hiFile)
               pure (Nothing, ([], Nothing))
             else do
-              r <- liftIO $ loadInterface session ms deps
-              case r of
+              r <- liftIO $ try $ loadInterface session ms deps
+              case join (first (show @SomeException) r) of
                 Right iface -> do
                   let result = HiFileResult ms iface
                   liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
