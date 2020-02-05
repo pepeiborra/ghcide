@@ -109,10 +109,10 @@ typecheckModule :: IdeDefer
                 -> HscEnv
                 -> [(ModSummary, (ModIface, Maybe Linkable))]
                 -> ParsedModule
-                -> IO (IdeResult TcModuleResult)
+                -> IO (IdeResult (HscEnv, TcModuleResult))
 typecheckModule (IdeDefer defer) hsc depsIn pm = do
-    fmap (either (, Nothing) (second Just)) $
-      runGhcEnv hsc $
+    fmap (either (, Nothing) (second Just) . fmap sequence . sequence) $
+      evalGhcEnv hsc $
       catchSrcErrors "typecheck" $ do
         -- Currently GetDependencies returns things in topological order so A comes before B if A imports B.
         -- We need to reverse this as GHC gets very unhappy otherwise and complains about broken interfaces.

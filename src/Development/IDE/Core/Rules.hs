@@ -363,7 +363,7 @@ typeCheckRuleDefinition file = do
   res <- liftIO $ typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
 
   when supportsHieFiles $
-    whenJust (snd res) $ \tcm -> do
+    whenJust (snd res) $ \(hsc, tcm) -> do
       (_, contents) <- getFileContents file
       liftIO $ generateAndWriteHieFile hsc (TE.encodeUtf8 <$> contents) (tmrModule tcm)
         `catch` \(e::IOException) -> do
@@ -372,7 +372,7 @@ typeCheckRuleDefinition file = do
         `catch` \(e::IOException) -> do
           logDebug logger $ T.pack $ "Error saving .hi file: " <> show e
 
-  return res
+  return $ second (fmap snd) res
  where
   unpack HiFileResult{..} bc = (hirModSummary, (hirModIface, bc))
   uses_th_qq dflags =
