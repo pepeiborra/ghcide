@@ -330,7 +330,11 @@ getSpanInfoRule =
 
 -- Typechecks a module.
 typeCheckRule :: Rules ()
-typeCheckRule = define $ \TypeCheck file -> do
+typeCheckRule = define $ \TypeCheck file -> typeCheck file
+
+-- | Executes the TypeCheck rule without creating a node in the Shake graph
+typeCheck :: NormalizedFilePath -> Action (IdeResult TcModuleResult)
+typeCheck file = do
   pm     <- use_ GetParsedModule file
   logger <- actionLogger
   liftIO
@@ -515,9 +519,9 @@ getModIfaceRule = define $ \GetModIface f -> do
         Just x ->
             return ([], Just x)
         Nothing -> do
-            tmr <- use_ TypeCheck f
-            let iface = hm_iface (tmrModInfo tmr)
-            return ([], Just $ HiFileResult (tmrModSummary tmr) iface)
+            (diags, tmr) <- typeCheck f
+            let iface = hm_iface . tmrModInfo <$> tmr
+            return (diags, HiFileResult . tmrModSummary<$> tmr <*> iface)
 
 -- | A rule that wires per-file rules together
 mainRule :: Rules ()
