@@ -204,7 +204,7 @@ cradleToSession cradle = do
         CradleNone -> fail "'none' cradle is not yet supported"
     libdir <- getLibdir
 
-    cacheDir <- getCacheDir opts
+    cacheDir <- Main.getCacheDir opts
 
     env <- runGhc (Just libdir) $ do
         dflags <- getSessionDynFlags

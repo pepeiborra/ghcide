@@ -56,6 +56,7 @@ import Data.List
 import Data.Ord
 import qualified Data.Set                                 as Set
 import qualified Data.Text                                as T
+import qualified Data.Text.Encoding                       as TE
 import           Development.IDE.GHC.Error
 import           Development.Shake                        hiding (Diagnostic)
 import Development.IDE.Core.RuleTypes
@@ -359,7 +360,7 @@ typeCheckRule = define $ \TypeCheck file -> do
   when supportsHieFiles $
     whenJust (snd res) $ \tcm -> do
       (_, contents) <- getFileContents file
-      liftIO $ generateAndWriteHieFile hsc (stringBufferToByteString <$> contents) (tmrModule tcm)
+      liftIO $ generateAndWriteHieFile hsc (TE.encodeUtf8 <$> contents) (tmrModule tcm)
         `catch` \(e::IOException) -> do
           logDebug logger $ T.pack $ "Error saving .hie file: " <> show e
       liftIO $ generateAndWriteHiFile hsc tcm
