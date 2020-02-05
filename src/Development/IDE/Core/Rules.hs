@@ -129,8 +129,7 @@ getHieFile IdeOptions {..} file mod = do
   case find (\x -> nmdModuleName x == moduleName mod) transitiveNamedModuleDeps of
     Just NamedModuleDep{nmdFilePath=nfp} -> do
         let modPath = fromNormalizedFilePath nfp
-        hieFile <- use GetHieFile nfp
-        liftIO $ print modPath
+        (_diags, hieFile) <- loadHieFileAction nfp
         return $ (, modPath) <$> hieFile
     _ -> do
       let unitId = moduleUnitId mod
@@ -432,8 +431,8 @@ getPackageHieFileRule =
     defineNoFile $ \(GetPackageHieFile f) -> do
     liftIO $ loadHieFile f
 
-getHieFileRule :: Rules ()
-getHieFileRule = define $ \GetHieFile f -> do
+loadHieFileAction :: NormalizedFilePath -> Action ([a], Maybe HieFile)
+loadHieFileAction f = do
   logger <- actionLogger
   pm <- use_ GetParsedModule f
   let normal_hie_f = toNormalizedFilePath hie_f
@@ -541,6 +540,5 @@ mainRule = do
     generateByteCodeRule
     loadGhcSession
     getPackageHieFileRule
-    getHieFileRule
     getHiFileRule
     getModIfaceRule

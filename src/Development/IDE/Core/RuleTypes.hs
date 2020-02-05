@@ -101,9 +101,6 @@ type instance RuleResult ReportImportCycles = ()
 -- | Read the given HIE file for an external package
 type instance RuleResult GetPackageHieFile = HieFile
 
--- | Read or generate the given HIE file for a local module
-type instance RuleResult GetHieFile = HieFile
-
 -- | Read the module interface file
 type instance RuleResult GetHiFile = HiFileResult
 
@@ -177,15 +174,6 @@ data GetPackageHieFile = GetPackageHieFile FilePath
 instance Hashable GetPackageHieFile
 instance NFData   GetPackageHieFile
 instance Binary   GetPackageHieFile
-
--- In this case we embed the filepath for the hie file.
--- The filepath of the source file (associated with the Shake key)
--- is used to track staleness.
-data GetHieFile = GetHieFile
-    deriving (Eq, Show, Typeable, Generic)
-instance Hashable GetHieFile
-instance NFData   GetHieFile
-instance Binary   GetHieFile
 
 data GetHiFile = GetHiFile
     deriving (Eq, Show, Typeable, Generic)
