@@ -506,14 +506,13 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
-    -- FIXME this dependency causes unnecessary reloading
-    filesOfInterest <- getFilesOfInterest
+    fileOfInterest <- use_ IsFileOfInterest f
     let useHiFile =
           -- Interface files do not carry location information, so
           -- never use interface files if .hie files are not available
           supportsHieFiles &&
           -- Never load interface files for files of interest
-          f `notElem` filesOfInterest
+          not fileOfInterest
     mbHiFile <- if useHiFile then use GetHiFile f else return Nothing
     case mbHiFile of
         Just x ->
@@ -525,6 +524,12 @@ getModIfaceRule = define $ \GetModIface f -> do
               Just tmr -> do
                 let !iface = hm_iface (tmrModInfo tmr)
                 return ([], Just $ HiFileResult (tmrModSummary tmr) iface)
+
+isFileOfInterestRule :: Rules ()
+isFileOfInterestRule = defineEarlyCutoff $ \IsFileOfInterest f -> do
+    filesOfInterest <- getFilesOfInterest
+    let res = f `elem` filesOfInterest
+    return (Just (if res then "1" else ""), ([], Just res))
 
 -- | A rule that wires per-file rules together
 mainRule :: Rules ()
@@ -542,3 +547,4 @@ mainRule = do
     getPackageHieFileRule
     getHiFileRule
     getModIfaceRule
+    isFileOfInterestRule
