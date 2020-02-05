@@ -36,7 +36,6 @@ module Development.IDE.GHC.Compat(
     module GHC,
     ) where
 
-import Data.ByteString (ByteString)
 import StringBuffer
 import DynFlags
 import FieldLabel
@@ -54,6 +53,7 @@ supportsHieFiles :: Bool
 supportsHieFiles = True
 
 #else
+import Data.ByteString (ByteString)
 import GhcPlugins hiding (ModLocation)
 import NameCache
 import Avail
