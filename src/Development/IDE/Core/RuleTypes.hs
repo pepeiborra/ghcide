@@ -105,6 +105,8 @@ type instance RuleResult GetHiFile = HiFileResult
 -- | Get a module interface, either from an interface file or a typechecked module
 type instance RuleResult GetModIface = HiFileResult
 
+type instance RuleResult IsFileOfInterest = Bool
+
 data GetParsedModule = GetParsedModule
     deriving (Eq, Show, Typeable, Generic)
 instance Hashable GetParsedModule
@@ -184,3 +186,10 @@ data GetModIface = GetModIface
 instance Hashable GetModIface
 instance NFData   GetModIface
 instance Binary   GetModIface
+
+
+data IsFileOfInterest = IsFileOfInterest
+    deriving (Eq, Show, Typeable, Generic)
+instance Hashable IsFileOfInterest
+instance NFData   IsFileOfInterest
+instance Binary   IsFileOfInterest
