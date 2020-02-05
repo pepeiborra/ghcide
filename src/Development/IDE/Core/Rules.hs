@@ -339,11 +339,6 @@ typeCheckRuleDefinition :: NormalizedFilePath -> Action (IdeResult TcModuleResul
 typeCheckRuleDefinition file = do
   pm     <- use_ GetParsedModule file
   logger <- actionLogger
-  liftIO
-    $  logDebug logger
-    $  T.pack
-    $  "Typechecking file "
-    <> fromNormalizedFilePath file
   deps <- use_ GetDependencies file
   hsc  <- hscEnv <$> use_ GhcSession file
   -- Figure out whether we need TemplateHaskell or QuasiQuotes support
@@ -449,7 +444,6 @@ loadHieFileAction f = do
       -- typecheck generates a .hie file as a side effect
       void $ use_ TypeCheck f
   hf <- liftIO $ loadHieFile hie_f
-  liftIO $ logDebug logger $ T.pack $ "Loaded .hie file " <> hie_f
   return ([], Just hf)
 
 
@@ -493,7 +487,6 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
               case r of
                 Right iface -> do
                   let result = HiFileResult ms iface
-                  liftIO $ logDebug logger $ T.pack $ "Loaded interface file " <> hiFile
                   return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
                 Left err -> do
                   let d = ideErrorText f errMsg
