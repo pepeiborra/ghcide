@@ -127,12 +127,11 @@ getHieFile IdeOptions {..} file mod = do
   TransitiveDependencies {transitiveNamedModuleDeps} <- use_ GetDependencies file
   pkgState  <- hscEnv <$> use_ GhcSession file
   case find (\x -> nmdModuleName x == moduleName mod) transitiveNamedModuleDeps of
-    Just NamedModuleDep{nmdModLocation=ml} ->
-      case ml_hs_file ml of
-        Just modPath -> do
-          hieFile <- use GetHieFile (toNormalizedFilePath modPath)
-          return $ (, modPath) <$> hieFile
-        _ -> return Nothing
+    Just NamedModuleDep{nmdFilePath=nfp} -> do
+        let modPath = fromNormalizedFilePath nfp
+        hieFile <- use GetHieFile nfp
+        liftIO $ print modPath
+        return $ (, modPath) <$> hieFile
     _ -> do
       let unitId = moduleUnitId mod
       case lookupPackageConfig unitId pkgState of
