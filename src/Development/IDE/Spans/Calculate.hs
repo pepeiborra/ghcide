@@ -50,7 +50,7 @@ import Development.IDE.Spans.Documentation
 -- | Get source span info, used for e.g. AtPoint and Goto Definition.
 getSrcSpanInfos
     :: HscEnv
-    -> [(Located ModuleName, Maybe NormalizedFilePath)]
+    -> [(Located ModuleName, Maybe NormalizedFilePath)] -- ^ Dependencies in topological order
     -> TcModuleResult
     -> [(ParsedModule, ModIface)]
     -> IO SpansInfo
@@ -74,7 +74,7 @@ getSpanInfo mods tcm@TypecheckedModule{..} deps =
          funBinds = funBindMap tm_parsed_module
 
      -- Load all modules in HPT to make their interface documentation available
-     mapM_ ((`loadDepModule` Nothing) . snd) deps
+     mapM_ ((`loadDepModule` Nothing) . snd) (reverse deps)
      forM_ (modInfoIface tm_checked_module_info) $ \modIface ->
        modifySession (loadModuleHome $ HomeModInfo modIface (snd tm_internals_) Nothing)
 
