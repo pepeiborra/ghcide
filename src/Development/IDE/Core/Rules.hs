@@ -27,7 +27,6 @@ module Development.IDE.Core.Rules(
 
 import Fingerprint
 
-import Control.Exception
 import Data.Binary
 import Data.Bifunctor (second)
 import Control.Monad.Extra
@@ -337,8 +336,7 @@ typeCheckRule = define $ \TypeCheck file -> typeCheckRuleDefinition file
 -- retain the information forever in the shake graph.
 typeCheckRuleDefinition :: NormalizedFilePath -> Action (IdeResult TcModuleResult)
 typeCheckRuleDefinition file = do
-  pm     <- use_ GetParsedModule file
-  logger <- actionLogger
+  pm   <- use_ GetParsedModule file
   deps <- use_ GetDependencies file
   hsc  <- hscEnv <$> use_ GhcSession file
   -- Figure out whether we need TemplateHaskell or QuasiQuotes support
@@ -357,17 +355,16 @@ typeCheckRuleDefinition file = do
 
   res <- liftIO $ typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
 
-  when supportsHieFiles $
-    whenJust (snd res) $ \(hsc, tcm) -> do
+  case res of
+    (diags, Just (hsc,tcm)) | supportsHieFiles -> do
       (_, contents) <- getFileContents file
-      liftIO $ generateAndWriteHieFile hsc (TE.encodeUtf8 <$> contents) (tmrModule tcm)
-        `catch` \(e::IOException) -> do
-          logDebug logger $ T.pack $ "Error saving .hie file: " <> show e
-      liftIO $ generateAndWriteHiFile hsc tcm
-        `catch` \(e::IOException) -> do
-          logDebug logger $ T.pack $ "Error saving .hi file: " <> show e
-
-  return $ second (fmap snd) res
+      diagsHie <- liftIO $
+        generateAndWriteHieFile hsc (TE.encodeUtf8 <$> contents) (tmrModule tcm)
+      diagsHi  <- liftIO $
+        generateAndWriteHiFile hsc tcm
+      return (diags <> diagsHi <> diagsHie, Just tcm)
+    (diags, res) ->
+      return (diags, snd <$> res)
  where
   unpack HiFileResult{..} bc = (hirModSummary, (hirModIface, bc))
   uses_th_qq dflags =
@@ -450,7 +447,6 @@ loadHieFileAction f = do
 getHiFileRule :: Rules ()
 getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
-  logger  <- actionLogger
   -- get all dependencies interface files, to check for freshness
   (deps,_)<- use_ GetLocatedImports f
   depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
@@ -464,38 +460,34 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
                 _ -> ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
 
+      mkDiag = pure . ideErrorWithSource (Just "interface file loading") (Just DsInfo) f . T.pack
+
   case sequence depHis of
     Nothing -> do
-          liftIO $ logDebug logger $ T.pack ("Missing dependencies for interface file: " <> hiFile)
-          pure (Nothing, ([], Nothing))
+          let d = mkDiag $ "Missing dependencies for interface file: " <> hiFile
+          pure (Nothing, (d, Nothing))
     Just deps -> do
       gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
       if not gotHiFile
         then do
-          liftIO $ logDebug logger $ T.pack ("Missing interface file: " <> hiFile)
-          pure (Nothing, ([], Nothing))
+          let d = mkDiag ("Missing interface file: " <> hiFile)
+          pure (Nothing, (d, Nothing))
         else do
           hiVersion  <- use_ GetModificationTime $ toNormalizedFilePath hiFile
           modVersion <- use_ GetModificationTime f
           let sourceModified = LT == comparing modificationTime hiVersion modVersion
           if sourceModified
             then do
-              liftIO $ logDebug logger $ T.pack ("Stale interface file: " <> hiFile)
-              pure (Nothing, ([], Nothing))
+              let d = mkDiag ("Stale interface file: " <> hiFile)
+              pure (Nothing, (d, Nothing))
             else do
               r <- liftIO $ loadInterface session ms deps
               case r of
                 Right iface -> do
                   let result = HiFileResult ms iface
                   return (Just (fingerprintToBS (mi_mod_hash iface)), ([], Just result))
-                Left err -> do
-                  let d = ideErrorText f errMsg
-                      errMsg = T.pack err
-                  liftIO
-                    $  logDebug logger
-                    $  T.pack ("Failed to load interface file " <> hiFile <> ": ")
-                    <> errMsg
-                  return (Nothing, ([d], Nothing))
+                Left err ->
+                  return (Nothing, (mkDiag err, Nothing))
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = define $ \GetModIface f -> do
