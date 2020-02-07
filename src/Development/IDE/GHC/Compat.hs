@@ -8,11 +8,12 @@
 -- | Attempt at hiding the GHC version differences we can.
 module Development.IDE.GHC.Compat(
     HieFileResult(..),
-    HieFile(..),
+    HieFile,
+    hieExportNames,
+    hie_module,
     mkHieFile,
     writeHieFile,
     readHieFile,
-    supportsHieFiles,
 #if !MIN_GHC_API_VERSION(8,8,0)
     ml_hie_file,
 #endif
@@ -43,23 +44,28 @@ import qualified Module
 
 import GHC hiding (ClassOpSig, DerivD, ForD, IEThingWith, InstD, TyClD, ValD, ModLocation)
 import qualified GHC
+import Avail
 
 #if MIN_GHC_API_VERSION(8,8,0)
 import Development.IDE.GHC.HieAst
 import HieBin
 import HieTypes
 
-supportsHieFiles :: Bool
-supportsHieFiles = True
+hieExportNames :: HieFile -> [(SrcSpan, Name)]
+hieExportNames = nameListFromAvails . hie_exports
 
 #else
+import Binary
+import Data.IORef
+import BinIface
 import Data.ByteString (ByteString)
 import GhcPlugins hiding (ModLocation)
 import NameCache
-import Avail
 import TcRnTypes
 import System.IO
 import Foreign.ForeignPtr
+import IfaceEnv
+import MkIface
 
 
 #if !MIN_GHC_API_VERSION(8,8,0)
@@ -69,23 +75,6 @@ hPutStringBuffer hdl (StringBuffer buf len cur)
              hPutBuf hdl ptr len
 #endif
 
-mkHieFile :: ModSummary -> TcGblEnv -> RenamedSource -> ByteString -> Hsc HieFile
-mkHieFile _ _ _ _ = return (HieFile () [])
-
-writeHieFile :: FilePath -> HieFile -> IO ()
-writeHieFile _ _ = return ()
-
-readHieFile :: NameCache -> FilePath -> IO (HieFileResult, ())
-readHieFile _ _ = return (HieFileResult (HieFile () []), ())
-
-ml_hie_file :: GHC.ModLocation -> FilePath
-ml_hie_file _ = ""
-
-data HieFile = HieFile {hie_module :: (), hie_exports :: [AvailInfo]}
-data HieFileResult = HieFileResult { hie_file_result :: HieFile }
-
-supportsHieFiles :: Bool
-supportsHieFiles = False
 #endif
 
 #if !MIN_GHC_API_VERSION(8,6,0)
@@ -181,4 +170,52 @@ dontWriteHieFiles d =
     gopt_unset d Opt_WriteHie
 #else
     d
+#endif
+
+nameListFromAvails :: [AvailInfo] -> [(SrcSpan, Name)]
+nameListFromAvails as =
+  map (\n -> (nameSrcSpan n, n)) (concatMap availNames as)
+
+#if !MIN_GHC_API_VERSION(8,8,0)
+-- Reimplementations of functions for HIE files for versions of GHC older
+-- than 8.8
+
+mkHieFile :: ModSummary -> TcGblEnv -> RenamedSource -> ByteString -> Hsc HieFile
+mkHieFile ms ts _ _ = return (HieFile (ms_mod ms) es)
+  where
+    es = nameListFromAvails (mkIfaceExports (tcg_exports ts))
+
+writeHieFile :: FilePath -> HieFile -> IO ()
+writeHieFile fp hie = do
+  bh <- openBinMem (1024 * 1024)
+  putWithUserData (const $ return ()) bh hie
+  writeBinMem bh fp
+
+readHieFile :: NameCache -> FilePath -> IO (HieFileResult, ())
+readHieFile nc fp = do
+  bh <- readBinMem fp
+  nc' <- newIORef nc
+  hie_file <- getWithUserData (NCU (atomicModifyIORef' nc')) bh
+  return (HieFileResult hie_file, ())
+
+ml_hie_file :: GHC.ModLocation -> FilePath
+ml_hie_file ml = ml_hi_file ml ++ ".hie"
+
+data HieFile = HieFile {hie_module :: Module, hie_exports :: [(SrcSpan, Name)]}
+
+hieExportNames :: HieFile -> [(SrcSpan, Name)]
+hieExportNames = hie_exports
+
+instance Binary HieFile where
+  put_ bh (HieFile m es) = do
+    put_ bh m
+    put_ bh es
+
+  get bh = do
+    mod <- get bh
+    es <- get bh
+    return (HieFile mod es)
+
+data HieFileResult = HieFileResult { hie_file_result :: HieFile }
+
 #endif
