@@ -59,7 +59,6 @@ import qualified Data.Text.Encoding                       as TE
 import           Development.IDE.GHC.Error
 import           Development.Shake                        hiding (Diagnostic)
 import Development.IDE.Core.RuleTypes
-import Development.IDE.Types.Logger (logDebug)
 import Development.IDE.Spans.Type
 
 import qualified GHC.LanguageExtensions as LangExt
@@ -425,7 +424,6 @@ getPackageHieFileRule =
 
 loadHieFileAction :: NormalizedFilePath -> Action ([a], Maybe HieFile)
 loadHieFileAction f = do
-  logger <- actionLogger
   pm <- use_ GetParsedModule f
   let normal_hie_f = toNormalizedFilePath hie_f
       hie_f = ml_hie_file $ ms_location $ pm_mod_summary pm
@@ -435,9 +433,6 @@ loadHieFileAction f = do
     (Just hie, src)
       | comparing modificationTime hie src == GT -> pure ()
     _ -> do
-      if isJust mbHieTimestamp
-        then liftIO $  logDebug logger $  T.pack $  "regenerating stale .hie file: " <> hie_f
-        else liftIO $  logDebug logger $  T.pack $  "generating missing .hie file: " <> hie_f
       -- typecheck generates a .hie file as a side effect
       void $ use_ TypeCheck f
   hf <- liftIO $ loadHieFile hie_f
