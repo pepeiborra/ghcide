@@ -450,30 +450,30 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   --      it should be possible to construct a ModSummary parsing just the imports
   --      (see HeaderInfo in the GHC package)
   pm      <- use_ GetParsedModule f
-  let hiFile = case ms_hsc_src ms of
+  let hiFile = toNormalizedFilePath $
+            case ms_hsc_src ms of
                 HsBootFile -> addBootSuffix (ml_hi_file $ ms_location ms)
                 _ -> ml_hi_file $ ms_location ms
       ms     = pm_mod_summary pm
-
       mkDiag = pure . ideErrorWithSource (Just "interface file loading") (Just DsInfo) f . T.pack
 
   case sequence depHis of
     Nothing -> do
-          let d = mkDiag $ "Missing dependencies for interface file: " <> hiFile
+          let d = mkDiag $ "Missing interface file dependencies"
           pure (Nothing, (d, Nothing))
     Just deps -> do
-      gotHiFile <- getFileExists $ toNormalizedFilePath hiFile
+      gotHiFile <- getFileExists hiFile
       if not gotHiFile
         then do
-          let d = mkDiag ("Missing interface file: " <> hiFile)
+          let d = mkDiag "Missing interface file"
           pure (Nothing, (d, Nothing))
         else do
-          hiVersion  <- use_ GetModificationTime $ toNormalizedFilePath hiFile
+          hiVersion  <- use_ GetModificationTime hiFile
           modVersion <- use_ GetModificationTime f
           let sourceModified = LT == comparing modificationTime hiVersion modVersion
           if sourceModified
             then do
-              let d = mkDiag ("Stale interface file: " <> hiFile)
+              let d = mkDiag "Stale interface file"
               pure (Nothing, (d, Nothing))
             else do
               r <- liftIO $ loadInterface session ms deps
