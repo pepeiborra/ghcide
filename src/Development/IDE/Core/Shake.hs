@@ -41,6 +41,7 @@ module Development.IDE.Core.Shake(
     updatePositionMapping,
     deleteValue,
     OnDiskRule(..),
+    actionLogDebug, actionLogError, actionLogInfo, actionLogWarning, actionLogTelemetry
     ) where
 
 import           Development.Shake hiding (ShakeValue, doesFileExist)
@@ -753,6 +754,20 @@ actionLogger = do
     ShakeExtras{logger} <- getShakeExtras
     return logger
 
+actionLogInfo :: T.Text -> Action ()
+actionLogInfo t = liftIO . (`logInfo` t) =<< actionLogger
+
+actionLogWarning :: T.Text -> Action ()
+actionLogWarning t = liftIO . (`logWarning` t) =<< actionLogger
+
+actionLogTelemetry :: T.Text -> Action ()
+actionLogTelemetry t = liftIO . (`logTelemetry` t) =<< actionLogger
+
+actionLogDebug :: T.Text -> Action ()
+actionLogDebug t = liftIO . (`logDebug` t) =<< actionLogger
+
+actionLogError :: T.Text -> Action ()
+actionLogError t = liftIO . (`logError` t) =<< actionLogger
 
 data GetModificationTime = GetModificationTime
     deriving (Eq, Show, Generic)
