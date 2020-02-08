@@ -18,7 +18,6 @@ module Development.IDE.Import.DependencyInformation
   , pathToId
   , idToPath
   , reachableModules
-  , modLocationToNormalizedFilePath
   , processDependencyInformation
   , transitiveDeps
   ) where
@@ -47,7 +46,7 @@ import GHC.Generics (Generic)
 
 import Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
-import Development.IDE.Import.FindImports (ArtifactsLocation(..))
+import Development.IDE.Import.FindImports (ArtifactLocation(..))
 
 import GHC
 import Module
@@ -69,33 +68,27 @@ newtype FilePathId = FilePathId { getFilePathId :: Int }
   deriving (Show, NFData, Eq, Ord)
 
 data PathIdMap = PathIdMap
-  { idToPathMap :: !(IntMap ArtifactsLocation)
+  { idToPathMap :: !(IntMap ArtifactLocation)
   , pathToIdMap :: !(HashMap NormalizedFilePath FilePathId)
   }
   deriving (Show, Generic)
 
 instance NFData PathIdMap
 
-modLocationToNormalizedFilePath :: ArtifactsLocation -> NormalizedFilePath
-modLocationToNormalizedFilePath (ArtifactsLocation loc) =
-    let (Just filePath) = ml_hs_file loc
-    in
-    toNormalizedFilePath filePath
-
 emptyPathIdMap :: PathIdMap
 emptyPathIdMap = PathIdMap IntMap.empty HMS.empty
 
-getPathId :: ArtifactsLocation -> PathIdMap -> (FilePathId, PathIdMap)
+getPathId :: ArtifactLocation -> PathIdMap -> (FilePathId, PathIdMap)
 getPathId path m@PathIdMap{..} =
-    case HMS.lookup (modLocationToNormalizedFilePath path) pathToIdMap of
+    case HMS.lookup (artifactFilePath path) pathToIdMap of
         Nothing ->
             let !newId = FilePathId $ HMS.size pathToIdMap
             in (newId, insertPathId path newId m)
         Just id -> (id, m)
 
-insertPathId :: ArtifactsLocation -> FilePathId -> PathIdMap -> PathIdMap
+insertPathId :: ArtifactLocation -> FilePathId -> PathIdMap -> PathIdMap
 insertPathId path id PathIdMap{..} =
-    PathIdMap (IntMap.insert (getFilePathId id) path idToPathMap) (HMS.insert (modLocationToNormalizedFilePath path) id pathToIdMap)
+    PathIdMap (IntMap.insert (getFilePathId id) path idToPathMap) (HMS.insert (artifactFilePath path) id pathToIdMap)
 
 insertImport :: FilePathId -> Either ModuleParseError ModuleImports -> RawDependencyInformation -> RawDependencyInformation
 insertImport (FilePathId k) v rawDepInfo = rawDepInfo { rawImports = IntMap.insert k v (rawImports rawDepInfo) }
@@ -104,9 +97,9 @@ pathToId :: PathIdMap -> NormalizedFilePath -> FilePathId
 pathToId PathIdMap{pathToIdMap} path = pathToIdMap HMS.! path
 
 idToPath :: PathIdMap -> FilePathId -> NormalizedFilePath
-idToPath pathIdMap filePathId = modLocationToNormalizedFilePath $ idToModLocation pathIdMap filePathId
+idToPath pathIdMap filePathId = artifactFilePath $ idToModLocation pathIdMap filePathId
 
-idToModLocation :: PathIdMap -> FilePathId -> ArtifactsLocation
+idToModLocation :: PathIdMap -> FilePathId -> ArtifactLocation
 idToModLocation PathIdMap{idToPathMap} (FilePathId id) = idToPathMap IntMap.! id
 
 
@@ -304,9 +297,9 @@ transitiveDeps DependencyInformation{..} file = do
   let transitiveModuleDeps =
         map (idToPath depPathIdMap . FilePathId) transitiveModuleDepIds
   let transitiveNamedModuleDeps =
-        [ NamedModuleDep (idToPath depPathIdMap (FilePathId fid)) mn ml
+        [ NamedModuleDep (idToPath depPathIdMap (FilePathId fid)) mn artifactModLocation
         | (fid, ShowableModuleName mn) <- IntMap.toList depModuleNames
-        , let ArtifactsLocation ml = idToPathMap depPathIdMap IntMap.! fid
+        , let ArtifactLocation{artifactModLocation} = idToPathMap depPathIdMap IntMap.! fid
         ]
   pure TransitiveDependencies {..}
   where

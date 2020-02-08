@@ -34,6 +34,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Development.IDE.Core.Compile
 import Development.IDE.Core.OfInterest
+import Development.IDE.Types.Logger (logDebug)
 import Development.IDE.Types.Options
 import Development.IDE.Spans.Calculate
 import Development.IDE.Import.DependencyInformation
@@ -228,7 +229,8 @@ getLocatedImportsRule =
 -- imports recursively.
 rawDependencyInformation :: NormalizedFilePath -> Action RawDependencyInformation
 rawDependencyInformation f = do
-    let (initialId, initialMap) = getPathId (ArtifactsLocation $ ModLocation (Just $ fromNormalizedFilePath f) "" "") emptyPathIdMap
+    let initialArtifact = ArtifactLocation f (ModLocation (Just $ fromNormalizedFilePath f) "" "")
+        (initialId, initialMap) = getPathId initialArtifact emptyPathIdMap
     go (IntSet.singleton $ getFilePathId initialId)
        (RawDependencyInformation IntMap.empty initialMap)
   where
@@ -246,7 +248,7 @@ rawDependencyInformation f = do
                     let rawDepInfo' = insertImport fId (Left ModuleParseError) rawDepInfo
                     in go fs rawDepInfo'
                   Just (modImports, pkgImports) -> do
-                    let f :: PathIdMap -> (a, Maybe ArtifactsLocation) -> (PathIdMap, (a, Maybe FilePathId))
+                    let f :: PathIdMap -> (a, Maybe ArtifactLocation) -> (PathIdMap, (a, Maybe FilePathId))
                         f pathMap (imp, mbPath) = case mbPath of
                             Nothing -> (pathMap, (imp, Nothing))
                             Just path ->
@@ -323,7 +325,7 @@ getSpanInfoRule =
         ifaces <- uses_ GetModIface tdeps
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
-        let imports = second (fmap modLocationToNormalizedFilePath) <$> fileImports
+        let imports = second (fmap artifactFilePath) <$> fileImports
         x <- liftIO $ getSrcSpanInfos packageState imports tc (zip parsedDeps $ map hirModIface ifaces)
         return ([], Just x)
 
@@ -331,7 +333,6 @@ getSpanInfoRule =
 typeCheckRule :: Rules ()
 typeCheckRule = define $ \TypeCheck file -> do
   pm     <- use_ GetParsedModule file
-  logger <- actionLogger
   deps <- use_ GetDependencies file
   hsc  <- hscEnv <$> use_ GhcSession file
   -- Figure out whether we need TemplateHaskell or QuasiQuotes support
@@ -408,7 +409,7 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   logger  <- actionLogger
   -- get all dependencies interface files, to check for freshness
   (deps,_)<- use_ GetLocatedImports f
-  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
+  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap artifactFilePath . snd) deps)
 
   -- TODO find the hi file without relying on the parsed module
   --      it should be possible to construct a ModSummary parsing just the imports
