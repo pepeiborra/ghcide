@@ -228,7 +228,8 @@ getLocatedImportsRule =
 -- imports recursively.
 rawDependencyInformation :: NormalizedFilePath -> Action RawDependencyInformation
 rawDependencyInformation f = do
-    let (initialId, initialMap) = getPathId (ArtifactsLocation $ ModLocation (Just $ fromNormalizedFilePath f) "" "") emptyPathIdMap
+    let initialArtifact = ArtifactLocation f (ModLocation (Just $ fromNormalizedFilePath f) "" "")
+        (initialId, initialMap) = getPathId initialArtifact emptyPathIdMap
     go (IntSet.singleton $ getFilePathId initialId)
        (RawDependencyInformation IntMap.empty initialMap)
   where
@@ -246,7 +247,7 @@ rawDependencyInformation f = do
                     let rawDepInfo' = insertImport fId (Left ModuleParseError) rawDepInfo
                     in go fs rawDepInfo'
                   Just (modImports, pkgImports) -> do
-                    let f :: PathIdMap -> (a, Maybe ArtifactsLocation) -> (PathIdMap, (a, Maybe FilePathId))
+                    let f :: PathIdMap -> (a, Maybe ArtifactLocation) -> (PathIdMap, (a, Maybe FilePathId))
                         f pathMap (imp, mbPath) = case mbPath of
                             Nothing -> (pathMap, (imp, Nothing))
                             Just path ->
@@ -323,7 +324,7 @@ getSpanInfoRule =
         ifaces <- uses_ GetModIface tdeps
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
-        let imports = second (fmap modLocationToNormalizedFilePath) <$> fileImports
+        let imports = second (fmap artifactFilePath) <$> fileImports
         x <- liftIO $ getSrcSpanInfos packageState imports tc (zip pms $ map hirModIface ifaces)
         return ([], Just x)
 
@@ -408,7 +409,7 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   logger  <- actionLogger
   -- get all dependencies interface files, to check for freshness
   (deps,_)<- use_ GetLocatedImports f
-  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
+  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap artifactFilePath . snd) deps)
 
   -- TODO find the hi file without relying on the parsed module
   --      it should be possible to construct a ModSummary parsing just the imports
