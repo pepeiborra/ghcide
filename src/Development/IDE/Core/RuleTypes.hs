@@ -27,7 +27,7 @@ import HscTypes (CgGuts, Linkable, HomeModInfo, ModDetails)
 import Development.IDE.GHC.Compat
 
 import           Development.IDE.Spans.Type
-import           Development.IDE.Import.FindImports (ArtifactsLocation)
+import           Development.IDE.Import.FindImports (ArtifactLocation)
 
 
 -- NOTATION
@@ -91,7 +91,7 @@ type instance RuleResult GhcSession = HscEnvEq
 
 -- | Resolve the imports in a module to the file path of a module
 -- in the same package or the package id of another package.
-type instance RuleResult GetLocatedImports = ([(Located ModuleName, Maybe ArtifactsLocation)], S.Set InstalledUnitId)
+type instance RuleResult GetLocatedImports = ([(Located ModuleName, Maybe ArtifactLocation)], S.Set InstalledUnitId)
 
 -- | This rule is used to report import cycles. It depends on GetDependencyInformation.
 -- We cannot report the cycles directly from GetDependencyInformation since

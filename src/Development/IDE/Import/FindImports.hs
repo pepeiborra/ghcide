@@ -7,7 +7,7 @@
 module Development.IDE.Import.FindImports
   ( locateModule
   , Import(..)
-  , ArtifactsLocation(..)
+  , ArtifactLocation(..)
   , isBootLocation
   ) where
 
@@ -31,20 +31,24 @@ import           Control.Monad.IO.Class
 import           System.FilePath
 
 data Import
-  = FileImport !ArtifactsLocation
+  = FileImport !ArtifactLocation
   | PackageImport !M.InstalledUnitId
   deriving (Show)
 
 type IsSource = Bool -- True if a module is a source import
 
-data ArtifactsLocation =  ArtifactsLocation !ModLocation !IsSource
+data ArtifactLocation = ArtifactLocation
+  { artifactFilePath :: !NormalizedFilePath
+  , artifactModLocation :: !ModLocation
+  , artifactIsSource :: !IsSource
+  }
     deriving (Show)
 
-isBootLocation :: ArtifactsLocation -> Bool
-isBootLocation (ArtifactsLocation _ is_src) = not is_src
+isBootLocation :: ArtifactLocation -> Bool
+isBootLocation = not . artifactIsSource
 
-instance NFData ArtifactsLocation where
-  rnf = const ()
+instance NFData ArtifactLocation where
+  rnf ArtifactLocation{..} = rnf artifactFilePath `seq` rwhnf artifactModLocation `seq` rnf artifactIsSource
 
 instance NFData Import where
   rnf (FileImport x) = rnf x
@@ -100,7 +104,7 @@ locateModule dflags exts doesExist modName mbPkgName isSource = do
   where
     toModLocation file = liftIO $ do
         loc <- mkHomeModLocation dflags (unLoc modName) (fromNormalizedFilePath file)
-        return $ Right $ FileImport $ ArtifactsLocation loc (not isSource)
+        return $ Right $ FileImport $ ArtifactLocation file loc (not isSource)
 
 
     lookupInPackageDB dfs =

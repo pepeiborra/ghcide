@@ -203,7 +203,8 @@ getLocatedImportsRule =
 -- imports recursively.
 rawDependencyInformation :: NormalizedFilePath -> Action RawDependencyInformation
 rawDependencyInformation f = do
-    let (initialId, initialMap) = getPathId (ArtifactsLocation (ModLocation (Just $ fromNormalizedFilePath f) "" "") False) emptyPathIdMap
+    let initialArtifact = ArtifactLocation f (ModLocation (Just $ fromNormalizedFilePath f) "" "") False
+        (initialId, initialMap) = getPathId initialArtifact emptyPathIdMap
     (rdi, ss) <- go (IntSet.singleton $ getFilePathId initialId)
                     ((RawDependencyInformation IntMap.empty initialMap IntMap.empty), IntMap.empty)
     let bm = IntMap.foldrWithKey (updateBootMap rdi) IntMap.empty ss
@@ -223,9 +224,9 @@ rawDependencyInformation f = do
                     let rawDepInfo' = insertImport fId (Left ModuleParseError) rawDepInfo
                     in go fs (rawDepInfo', ss)
                   Just (modImports, pkgImports) -> do
-                    let f :: (PathIdMap, IntMap ArtifactsLocation)
-                          -> (a, Maybe ArtifactsLocation)
-                          -> ((PathIdMap, IntMap ArtifactsLocation), (a, Maybe FilePathId))
+                    let f :: (PathIdMap, IntMap ArtifactLocation)
+                          -> (a, Maybe ArtifactLocation)
+                          -> ((PathIdMap, IntMap ArtifactLocation), (a, Maybe FilePathId))
                         f (pathMap, ss) (imp, mbPath) = case mbPath of
                             Nothing -> ((pathMap, ss), (imp, Nothing))
                             Just path ->
@@ -246,10 +247,10 @@ rawDependencyInformation f = do
 
 
 
-    updateBootMap pm boot_mod_id (ArtifactsLocation locs is_src) bm =
-      if not is_src
+    updateBootMap pm boot_mod_id ArtifactLocation{..} bm =
+      if not artifactIsSource
         then
-          let msource_mod_id = lookupPathToId (rawPathIdMap pm) (toNormalizedFilePath $ dropBootSuffix locs )
+          let msource_mod_id = lookupPathToId (rawPathIdMap pm) (toNormalizedFilePath $ dropBootSuffix artifactModLocation)
           in case msource_mod_id of
                Just source_mod_id -> insertBootId source_mod_id (FilePathId boot_mod_id) bm
                Nothing -> bm
@@ -321,7 +322,7 @@ getSpanInfoRule =
         ifaces <- uses_ GetModIface tdeps
         (fileImports, _) <- use_ GetLocatedImports file
         packageState <- hscEnv <$> use_ GhcSession file
-        let imports = second (fmap modLocationToNormalizedFilePath) <$> fileImports
+        let imports = second (fmap artifactFilePath) <$> fileImports
         x <- liftIO $ getSrcSpanInfos packageState imports tc (zip pms $ map hirModIface ifaces)
         return ([], Just x)
 
@@ -444,7 +445,7 @@ getHiFileRule = defineEarlyCutoff $ \GetHiFile f -> do
   session <- hscEnv <$> use_ GhcSession f
   -- get all dependencies interface files, to check for freshness
   (deps,_)<- use_ GetLocatedImports f
-  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap modLocationToNormalizedFilePath . snd) deps)
+  depHis  <- traverse (use GetHiFile) (mapMaybe (fmap artifactFilePath . snd) deps)
 
   -- TODO find the hi file without relying on the parsed module
   --      it should be possible to construct a ModSummary parsing just the imports
