@@ -20,11 +20,11 @@ import           Language.Haskell.LSP.Types
 
 -- | Lsp client relevant configuration details
 data IdeConfiguration = IdeConfiguration
-  { workspaceFolders :: HashSet NormalizedUri
+  { workspaceFolders :: HashSet Uri
   }
   deriving (Show)
 
-data IdeConfigurationVar = IdeConfigurationVar {unIdeConfigurationRef :: Var IdeConfiguration}
+newtype IdeConfigurationVar = IdeConfigurationVar {unIdeConfigurationRef :: Var IdeConfiguration}
 
 instance IsIdeGlobal IdeConfigurationVar
 
@@ -41,17 +41,17 @@ parseConfiguration RequestMessage { _params = InitializeParams {..} } =
   IdeConfiguration { .. }
  where
   workspaceFolders =
-    foldMap (singleton . toNormalizedUri) _rootUri
+    foldMap singleton _rootUri
       <> (foldMap . foldMap)
            (singleton . parseWorkspaceFolder)
            _workspaceFolders
 
-parseWorkspaceFolder :: WorkspaceFolder -> NormalizedUri
+parseWorkspaceFolder :: WorkspaceFolder -> Uri
 parseWorkspaceFolder =
-  toNormalizedUri . Uri . (_uri :: WorkspaceFolder -> Text)
+   Uri . (_uri :: WorkspaceFolder -> Text)
 
 modifyWorkspaceFolders
-  :: IdeState -> (HashSet NormalizedUri -> HashSet NormalizedUri) -> IO ()
+  :: IdeState -> (HashSet Uri -> HashSet Uri) -> IO ()
 modifyWorkspaceFolders ide f = do
   IdeConfigurationVar var <- getIdeGlobalState ide
   IdeConfiguration    ws  <- readVar var
@@ -60,7 +60,6 @@ modifyWorkspaceFolders ide f = do
 isWorkspaceFile :: NormalizedFilePath -> Action Bool
 isWorkspaceFile file = do
   IdeConfiguration {..} <- getIdeConfiguration
-  let toText = getUri . fromNormalizedUri
   return $ any
-    (\root -> toText root `isPrefixOf` toText (filePathToUri' file))
+    (\root -> getUri root `isPrefixOf` getUri (fromNormalizedUri $ filePathToUri' file))
     workspaceFolders
