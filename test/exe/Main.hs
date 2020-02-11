@@ -63,6 +63,7 @@ main = defaultMain $ testGroup "HIE"
   , unitTests
   , haddockTests
   , positionMappingTests
+  , watchedFilesTests
   ]
 
 initializeResponseTests :: TestTree
@@ -411,6 +412,26 @@ codeActionTests = testGroup "code actions"
 codeLensesTests :: TestTree
 codeLensesTests = testGroup "code lenses"
   [ addSigLensesTests
+  ]
+
+watchedFilesTests :: TestTree
+watchedFilesTests = testGroup "watched files"
+  [ testSession "workspace file" $ do
+      _ <- openDoc' "A.hs" "haskell" "module A where"
+      msg <- skipManyTill anyMessage message
+      let RegistrationParams (List regs) = _params (msg :: RegisterCapabilityRequest)
+      liftIO $ assertBool "Watches open documents" (not $ null regs)
+      let Registration _id capability args : _ = regs
+      liftIO $ capability @?= WorkspaceDidChangeWatchedFiles
+      liftIO $ length args @?= 1
+  , testSession "non workspace file" $ do
+      _ <- openDoc "test/Main.hs" "haskell"
+      msg <- TODO
+      let RegistrationParams (List regs) = _params (msg :: RegisterCapabilityRequest)
+      liftIO $ assertBool "Watches open documents" (not $ null regs)
+      let Registration _id capability args : _ = regs
+      liftIO $ capability @?= WorkspaceDidChangeWatchedFiles
+      liftIO $ length args @?= 1
   ]
 
 renameActionTests :: TestTree
@@ -1752,8 +1773,11 @@ run s = withTempDir $ \dir -> do
 
 openTestDataDoc :: FilePath -> Session TextDocumentIdentifier
 openTestDataDoc path = do
-  source <- liftIO $ readFileUtf8 $ "test/data" </> path
+  source <- liftIO $ readFileUtf8 $ testDataFolder </> path
   openDoc' path "haskell" source
+
+testDataFolder :: FilePath
+testDataFolder = "test/data"
 
 findCodeActions :: TextDocumentIdentifier -> Range -> [T.Text] -> Session [CodeAction]
 findCodeActions doc range expectedTitles = do
