@@ -1,7 +1,7 @@
 -- Copyright (c) 2019 The DAML Authors. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
-{-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 -- WARNING: A copy of DA.Daml.LanguageServer, try to keep them in sync
 -- This version removes the daml: handling
@@ -9,34 +9,52 @@ module Development.IDE.LSP.LanguageServer
     ( runLanguageServer
     ) where
 
-import           Language.Haskell.LSP.Types
-import           Language.Haskell.LSP.Types.Capabilities
+import           Control.Concurrent.Async
+import           Control.Concurrent.Chan
+import           Control.Concurrent.Extra
+import           Control.Concurrent.STM
+import           Control.Exception.Safe
+import           Control.Monad.Extra
+import           Data.Aeson                              (ToJSON)
+import           Data.Default
+import           Data.Maybe
+import qualified Data.Set                                as Set
+import qualified Data.Text                               as T
+import           Development.IDE.Core.FileStore
+import           Development.IDE.Core.IdeConfiguration
+import           Development.IDE.Core.Shake
+import qualified Development.IDE.GHC.Util                as Ghcide
+import           Development.IDE.LSP.HoverDefinition
+import           Development.IDE.LSP.Notifications
+import           Development.IDE.LSP.Outline
 import           Development.IDE.LSP.Server
-import qualified Development.IDE.GHC.Util as Ghcide
-import qualified Language.Haskell.LSP.Control as LSP
-import qualified Language.Haskell.LSP.Core as LSP
-import Control.Concurrent.Chan
-import Control.Concurrent.Extra
-import Control.Concurrent.Async
-import Control.Concurrent.STM
-import Control.Exception.Safe
-import Data.Default
-import Data.Maybe
-import qualified Data.Set as Set
-import qualified Data.Text as T
-import GHC.IO.Handle (hDuplicate)
-import System.IO
-import Control.Monad.Extra
-
-import Development.IDE.Core.IdeConfiguration
-import Development.IDE.Core.Shake
-import Development.IDE.LSP.HoverDefinition
-import Development.IDE.LSP.Notifications
-import Development.IDE.LSP.Outline
-import Development.IDE.Types.Logger
-import Development.IDE.Core.FileStore
-import Language.Haskell.LSP.Core (LspFuncs(..))
-import Language.Haskell.LSP.Messages
+import           Development.IDE.Types.Logger
+import           GHC.IO.Handle                           (hDuplicate)
+import qualified Language.Haskell.LSP.Control            as LSP
+import           Language.Haskell.LSP.Core               (LspFuncs (..))
+import qualified Language.Haskell.LSP.Core               as LSP
+import           Language.Haskell.LSP.Messages
+import           Language.Haskell.LSP.Types              (CancelParams (..),
+                                                          DidChangeConfigurationNotification,
+                                                          ErrorCode (InternalError, RequestCancelled),
+                                                          InitializeParams,
+                                                          InitializeRequest,
+                                                          List (..), LspId,
+                                                          NotificationMessage (..),
+                                                          ProgressParams (..),
+                                                          ProgressParams,
+                                                          ProgressParams,
+                                                          ProgressToken,
+                                                          RequestMessage (..),
+                                                          ResponseError (..),
+                                                          ResponseMessage (..),
+                                                          SaveOptions (..),
+                                                          ServerMethod (Progress),
+                                                          TextDocumentSyncKind (TdSyncIncremental),
+                                                          TextDocumentSyncOptions (..),
+                                                          responseId)
+import           Language.Haskell.LSP.Types.Capabilities
+import           System.IO
 
 runLanguageServer
     :: forall config. (Show config)
@@ -78,6 +96,12 @@ runLanguageServer options userHandlers onInitialConfig onConfigChange getIdeStat
     let withResponse wrap f = Just $ \r@RequestMessage{_id} -> do
             atomically $ modifyTVar pendingRequests (Set.insert _id)
             writeChan clientMsgChan $ Response r wrap f
+    let withPartialResponse unwrap wrapPartial wrapFull f = Just $ \r@RequestMessage{_id} -> do
+            atomically $ modifyTVar pendingRequests (Set.insert _id)
+            writeChan clientMsgChan $ PartialResponse r unwrap wrapPartial wrapFull f
+    let withFinalizePartialResponse wrap = Just $ \r@RequestMessage{_id} -> do
+            atomically $ modifyTVar pendingRequests (Set.insert _id)
+            writeChan clientMsgChan $ FinalizePartialResponse r wrap
     let withNotification old f = Just $ \r -> writeChan clientMsgChan $ Notification r (\lsp ide x -> f lsp ide x >> whenJust old ($ r))
     let withResponseAndRequest wrap wrapNewReq f = Just $ \r@RequestMessage{_id} -> do
             atomically $ modifyTVar pendingRequests (Set.insert _id)
@@ -103,12 +127,14 @@ runLanguageServer options userHandlers onInitialConfig onConfigChange getIdeStat
             setHandlersIgnore <> -- least important
             setHandlersDefinition <> setHandlersHover <>
             setHandlersOutline <>
+            partialResponseHandlers <>
             userHandlers <>
             setHandlersNotifications <> -- absolutely critical, join them with user notifications
             cancelHandler cancelRequest
+
             -- Cancel requests are special since they need to be handled
             -- out of order to be useful. Existing handlers are run afterwards.
-    handlers <- parts WithMessage{withResponse, withNotification, withResponseAndRequest, withInitialize} def
+    handlers <- parts WithMessage{withResponse, withFinalizePartialResponse, withPartialResponse, withNotification, withResponseAndRequest, withInitialize} def
 
     let initializeCallbacks = LSP.InitializeCallbacks
             { LSP.onInitialConfiguration = onInitialConfig
@@ -146,6 +172,20 @@ runLanguageServer options userHandlers onInitialConfig onConfigChange getIdeStat
                             \case
                               Left e  -> sendFunc $ wrap $ ResponseMessage "2.0" (responseId _id) Nothing (Just e)
                               Right r -> sendFunc $ wrap $ ResponseMessage "2.0" (responseId _id) (Just r) Nothing
+                    FinalizePartialResponse x@RequestMessage{_id, _params} wrap ->
+                        checkCancelled ide clearReqId waitForCancel lspFuncs wrap (\_ _ _ -> pure ()) x _id _params $ \() ->
+                              sendFunc $ wrap $ ResponseMessage "2.0" (responseId _id) Nothing Nothing
+                    PartialResponse x@RequestMessage{_id, _params} getProgToken wrapPartial wrapFull act ->
+                        checkCancelled ide clearReqId waitForCancel lspFuncs wrapFull act x _id _params $
+                            \case
+                              Left e  -> sendFunc $ wrapFull $ ResponseMessage "2.0" (responseId _id) Nothing (Just e)
+                              Right (Just r) | Just pt <- getProgToken _params ->
+                                  sendFunc $
+                                    wrapPartial
+                                        (NotificationMessage "2.0" Progress
+                                            (ProgressParams pt r))
+                              Right (Just r) -> sendFunc $ wrapFull $ ResponseMessage "2.0" (responseId _id) (Just r) Nothing
+                              Right _ -> return ()
                     ResponseAndRequest x@RequestMessage{_id, _params} wrap wrapNewReq act ->
                         checkCancelled ide clearReqId waitForCancel lspFuncs wrap act x _id _params $
                             \(res, newReq) -> do
@@ -218,14 +258,41 @@ cancelHandler cancelRequest = PartialHandlers $ \_ x -> return x
 -- | A message that we need to deal with - the pieces are split up with existentials to gain additional type safety
 --   and defer precise processing until later (allows us to keep at a higher level of abstraction slightly longer)
 data Message c
-    = forall m req resp . (Show m, Show req) => Response (RequestMessage m req resp) (ResponseMessage resp -> FromServerMessage) (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError resp))
+    = forall m req resp . (Show m, Show req)
+    => Response
+        (RequestMessage m req resp)
+        (ResponseMessage resp -> FromServerMessage)
+        (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError resp))
+    | forall m req resp . (Show m, Show req, ToJSON resp)
+    => PartialResponse
+        (RequestMessage m req resp)
+        (req -> Maybe ProgressToken)
+        (NotificationMessage ServerMethod (ProgressParams resp) -> FromServerMessage)
+        (ResponseMessage resp -> FromServerMessage)
+        (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError (Maybe resp)))
+    | forall m req resp
+    . (Show m, Show req)
+    => FinalizePartialResponse
+        (RequestMessage m req resp)
+        (ResponseMessage resp -> FromServerMessage)
     -- | Used for cases in which we need to send not only a response,
     --   but also an additional request to the client.
     --   For example, 'executeCommand' may generate an 'applyWorkspaceEdit' request.
-    | forall m rm req resp newReqParams newReqBody . (Show m, Show rm, Show req) => ResponseAndRequest (RequestMessage m req resp) (ResponseMessage resp -> FromServerMessage) (RequestMessage rm newReqParams newReqBody -> FromServerMessage) (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError resp, Maybe (rm, newReqParams)))
-    | forall m req . (Show m, Show req) => Notification (NotificationMessage m req) (LSP.LspFuncs c -> IdeState -> req -> IO ())
+    | forall m rm req resp newReqParams newReqBody
+    . (Show m, Show rm, Show req)
+    => ResponseAndRequest
+        (RequestMessage m req resp)
+        (ResponseMessage resp -> FromServerMessage)
+        (RequestMessage rm newReqParams newReqBody -> FromServerMessage)
+        (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError resp, Maybe (rm, newReqParams)))
+    | forall m req . (Show m, Show req)
+    => Notification
+        (NotificationMessage m req)
+        (LSP.LspFuncs c -> IdeState -> req -> IO ())
     -- | Used for the InitializeRequest only, where the response is generated by the LSP core handler.
-    | InitialParams InitializeRequest (LSP.LspFuncs c -> IdeState -> InitializeParams -> IO ())
+    | InitialParams
+        InitializeRequest
+        (LSP.LspFuncs c -> IdeState -> InitializeParams -> IO ())
 
 modifyOptions :: LSP.Options -> LSP.Options
 modifyOptions x = x{ LSP.textDocumentSync   = Just $ tweakTDS origTDS
@@ -234,3 +301,8 @@ modifyOptions x = x{ LSP.textDocumentSync   = Just $ tweakTDS origTDS
         tweakTDS tds = tds{_openClose=Just True, _change=Just TdSyncIncremental, _save=Just $ SaveOptions Nothing}
         origTDS = fromMaybe tdsDefault $ LSP.textDocumentSync x
         tdsDefault = TextDocumentSyncOptions Nothing Nothing Nothing Nothing Nothing
+
+partialResponseHandlers :: PartialHandlers c
+partialResponseHandlers = PartialHandlers $ \WithMessage{..} def -> return $ def{
+    LSP.codeActionHandler = withResponse RspCodeAction $ \ _ _ _ -> return $ Right $ List []
+}

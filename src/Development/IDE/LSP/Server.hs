@@ -15,11 +15,21 @@ import           Language.Haskell.LSP.Types
 import qualified Language.Haskell.LSP.Core as LSP
 import qualified Language.Haskell.LSP.Messages as LSP
 import Development.IDE.Core.Service
+import Data.Aeson (ToJSON)
 
 data WithMessage c = WithMessage
     {withResponse :: forall m req resp . (Show m, Show req) =>
         (ResponseMessage resp -> LSP.FromServerMessage) -> -- how to wrap a response
         (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError resp)) -> -- actual work
+        Maybe (LSP.Handler (RequestMessage m req resp))
+    ,withPartialResponse :: forall m req resp . (Show m, Show req, ToJSON resp) =>
+        (req -> Maybe ProgressToken) ->
+        (NotificationMessage ServerMethod (ProgressParams resp) -> LSP.FromServerMessage) -> -- how to wrap a partial response
+        (ResponseMessage resp -> LSP.FromServerMessage) -> -- how to wrap a response
+        (LSP.LspFuncs c -> IdeState -> req -> IO (Either ResponseError (Maybe resp))) -> -- actual work
+        Maybe (LSP.Handler (RequestMessage m req resp))
+    ,withFinalizePartialResponse :: forall m req resp . (Show m, Show req) =>
+        (ResponseMessage resp -> LSP.FromServerMessage) -> -- how to wrap a response
         Maybe (LSP.Handler (RequestMessage m req resp))
     ,withNotification :: forall m req . (Show m, Show req) =>
         Maybe (LSP.Handler (NotificationMessage m req)) -> -- old notification handler
