@@ -2,5 +2,6 @@ resolver: nightly-2020-02-13
 packages:
 - .
 extra-deps:
+- yaml-0.11.3.0
 nix:
   packages: [zlib]
