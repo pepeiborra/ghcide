@@ -140,6 +140,7 @@ runGhcEnv env act = do
     let dflags = (hsc_dflags env){filesToClean=filesToClean, dirsToClean=dirsToClean, useUnicode=True}
     ref <- newIORef env{hsc_dflags=dflags}
     res <- unGhc act (Session ref) `finally` do
+        dflags <- hsc_dflags <$> readIORef ref
         cleanTempFiles dflags
         cleanTempDirs dflags
     (,res) <$> readIORef ref
