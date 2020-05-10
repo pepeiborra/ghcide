@@ -30,10 +30,9 @@ module Development.IDE.Core.Shake(
     use, useWithStale, useNoFile, uses, usesWithStale,
     use_, useNoFile_, uses_,
     define, defineEarlyCutoff, defineOnDisk, needOnDisk, needOnDisks,
-    getDiagnostics, unsafeClearDiagnostics,
+    getDiagnostics,
     getHiddenDiagnostics,
     IsIdeGlobal, addIdeGlobal, addIdeGlobalExtras, getIdeGlobalState, getIdeGlobalAction,
-    garbageCollect,
     setPriority,
     sendEvent,
     ideLogger,
@@ -56,10 +55,8 @@ import           Data.Dynamic
 import           Data.Maybe
 import Data.Map.Strict (Map)
 import           Data.List.Extra (foldl', partition, takeEnd)
-import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Traversable (for)
-import Data.Tuple.Extra
 import Data.Unique
 import Development.IDE.Core.Debouncer
 import Development.IDE.Core.PositionMapping
@@ -197,12 +194,6 @@ lastValue file v = do
         Succeeded ver v -> Just (v, mappingForVersion allMappings file ver)
         Stale ver v -> Just (v, mappingForVersion allMappings file ver)
         Failed -> Nothing
-
-valueVersion :: Value v -> Maybe TextDocumentVersion
-valueVersion = \case
-    Succeeded ver _ -> Just ver
-    Stale ver _ -> Just ver
-    Failed -> Nothing
 
 mappingForVersion
     :: HMap.HashMap NormalizedUri (Map TextDocumentVersion PositionMapping)
@@ -491,27 +482,6 @@ getHiddenDiagnostics IdeState{shakeExtras = ShakeExtras{hiddenDiagnostics}} = do
     val <- readVar hiddenDiagnostics
     return $ getAllDiagnostics val
 
--- | FIXME: This function is temporary! Only required because the files of interest doesn't work
-unsafeClearDiagnostics :: IdeState -> IO ()
-unsafeClearDiagnostics IdeState{shakeExtras = ShakeExtras{diagnostics}} =
-    writeVar diagnostics mempty
-
--- | Clear the results for all files that do not match the given predicate.
-garbageCollect :: (NormalizedFilePath -> Bool) -> Action ()
-garbageCollect keep = do
-    ShakeExtras{state, diagnostics,hiddenDiagnostics,publishedDiagnostics,positionMapping} <- getShakeExtras
-    liftIO $
-        do newState <- modifyVar state $ \values -> do
-               values <- evaluate $ HMap.filterWithKey (\(file, _) _ -> keep file) values
-               return $! dupe values
-           modifyVar_ diagnostics $ \diags -> return $! filterDiagnostics keep diags
-           modifyVar_ hiddenDiagnostics $ \hdiags -> return $! filterDiagnostics keep hdiags
-           modifyVar_ publishedDiagnostics $ \diags -> return $! HMap.filterWithKey (\uri _ -> keep (fromUri uri)) diags
-           let versionsForFile =
-                   HMap.fromListWith Set.union $
-                   mapMaybe (\((file, _key), v) -> (filePathToUri' file,) . Set.singleton <$> valueVersion v) $
-                   HMap.toList newState
-           modifyVar_ positionMapping $ \mappings -> return $! filterVersionMap versionsForFile mappings
 define
     :: IdeRule k v
     => (k -> NormalizedFilePath -> Action (IdeResult v)) -> Rules ()
@@ -866,20 +836,6 @@ getFileDiagnostics ::
 getFileDiagnostics fp ds =
     maybe [] getDiagnosticsFromStore $
     HMap.lookup (filePathToUri' fp) ds
-
-filterDiagnostics ::
-    (NormalizedFilePath -> Bool) ->
-    DiagnosticStore ->
-    DiagnosticStore
-filterDiagnostics keep =
-    HMap.filterWithKey (\uri _ -> maybe True (keep . toNormalizedFilePath') $ uriToFilePath' $ fromNormalizedUri uri)
-
-filterVersionMap
-    :: HMap.HashMap NormalizedUri (Set.Set TextDocumentVersion)
-    -> HMap.HashMap NormalizedUri (Map TextDocumentVersion a)
-    -> HMap.HashMap NormalizedUri (Map TextDocumentVersion a)
-filterVersionMap =
-    HMap.intersectionWith $ \versionsToKeep versionMap -> Map.restrictKeys versionMap versionsToKeep
 
 updatePositionMapping :: IdeState -> VersionedTextDocumentIdentifier -> List TextDocumentContentChangeEvent -> IO ()
 updatePositionMapping IdeState{shakeExtras = ShakeExtras{positionMapping}} VersionedTextDocumentIdentifier{..} changes = do

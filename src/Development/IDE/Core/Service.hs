@@ -13,7 +13,7 @@ module Development.IDE.Core.Service(
     runAction,
     runActionSync,
     writeProfile,
-    getDiagnostics, unsafeClearDiagnostics,
+    getDiagnostics,
     ideLogger,
     updatePositionMapping,
     ) where
