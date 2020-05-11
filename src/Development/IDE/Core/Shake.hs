@@ -84,6 +84,7 @@ import           GHC.Generics
 import           System.IO.Unsafe
 import           Numeric.Extra
 import Language.Haskell.LSP.Types
+import System.IO (stderr, hPutStrLn)
 
 
 -- information we stash inside the shakeExtra field
@@ -715,6 +716,20 @@ decodeShakeValue bs = case BS.uncons bs of
       | x == 's' -> ShakeStale xs
       | otherwise -> error $ "Failed to parse shake value " <> show bs
 
+modifyVarTraced name var f = do
+    hPutStrLn stderr $ "Awaiting to modify var " <> name
+    res <- modifyVar var $ \v -> do
+        hPutStrLn stderr $ "Modifying var " <> name
+        f v
+    hPutStrLn stderr $ "Modified var " <> name
+    return res
+
+modifyVarTraced_ name var f = do
+    hPutStrLn stderr $ "Awaiting to modify var " <> name
+    modifyVar_ var $ \v -> do
+        hPutStrLn stderr $ "Modifying var " <> name
+        f v
+    hPutStrLn stderr $ "Modified var " <> name
 
 updateFileDiagnostics ::
      NormalizedFilePath
@@ -730,14 +745,14 @@ updateFileDiagnostics fp k ShakeExtras{diagnostics, hiddenDiagnostics, published
         -- published. Otherwise, we might never publish certain diagnostics if
         -- an exception strikes between modifyVar but before
         -- publishDiagnosticsNotification.
-        newDiags <- modifyVar diagnostics $ \old -> do
+        newDiags <- modifyVarTraced "diagnostics" diagnostics $ \old -> do
             let newDiagsStore = setStageDiagnostics fp (vfsVersion =<< modTime)
                                   (T.pack $ show k) (map snd currentShown) old
             let newDiags = getFileDiagnostics fp newDiagsStore
             _ <- evaluate newDiagsStore
             _ <- evaluate newDiags
             pure (newDiagsStore, newDiags)
-        modifyVar_ hiddenDiagnostics $ \old -> do
+        modifyVarTraced_ "hiddenDiagnostics" hiddenDiagnostics $ \old -> do
             let newDiagsStore = setStageDiagnostics fp (vfsVersion =<< modTime)
                                   (T.pack $ show k) (map snd currentHidden) old
             let newDiags = getFileDiagnostics fp newDiagsStore
@@ -747,7 +762,7 @@ updateFileDiagnostics fp k ShakeExtras{diagnostics, hiddenDiagnostics, published
         let uri = filePathToUri' fp
         let delay = if null newDiags then 0.1 else 0
         registerEvent debouncer delay uri $ do
-             mask_ $ modifyVar_ publishedDiagnostics $ \published -> do
+             mask_ $ modifyVarTraced_ "publishedDiags" publishedDiagnostics $ \published -> do
                  let lastPublish = HMap.lookupDefault [] uri published
                  when (lastPublish /= newDiags) $
                      eventer $ publishDiagnosticsNotification (fromNormalizedUri uri) newDiags
