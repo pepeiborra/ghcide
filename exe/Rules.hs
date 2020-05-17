@@ -20,7 +20,7 @@ import           Development.IDE.Core.Service   (getIdeOptions)
 import           Development.IDE.Core.Shake     (actionLogger, sendEvent, define, useNoFile_)
 import           Development.IDE.GHC.Util
 import           Development.IDE.Types.Location (fromNormalizedFilePath)
-import           Development.IDE.Types.Options  (IdeOptions(IdeOptions, optTesting))
+import           Development.IDE.Types.Options  (IdeOptions(IdeOptions, optTesting), IdeTesting(..))
 import           Development.Shake
 import           GHC
 import           GHC.Check                      (VersionCheck(..), makeGhcVersionChecker)
@@ -63,7 +63,7 @@ cradleToSession = define $ \LoadCradle nfp -> do
 
     let f = fromNormalizedFilePath nfp
 
-    IdeOptions{optTesting} <- getIdeOptions
+    IdeOptions{optTesting = IdeTesting ideTesting} <- getIdeOptions
 
     logger <- actionLogger
     liftIO $ logDebug logger $ "Running cradle " <> pack (fromNormalizedFilePath nfp)
@@ -72,7 +72,7 @@ cradleToSession = define $ \LoadCradle nfp -> do
     mbYaml <- doesDirectoryExist f <&> \isDir -> if isDir then Nothing else Just f
     cradle <- liftIO $ maybe (loadImplicitCradle $ addTrailingPathSeparator f) loadCradle mbYaml
 
-    when optTesting $
+    when ideTesting $
         sendEvent $ notifyCradleLoaded f
 
     -- Avoid interrupting `getComponentOptions` since it calls external processes
