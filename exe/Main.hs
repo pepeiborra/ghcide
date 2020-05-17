@@ -100,7 +100,7 @@ main = do
             let options = (defaultIdeOptions $ loadSession dir)
                     { optReportProgress = clientSupportsProgress caps
                     , optShakeProfiling = argsShakeProfiling
-                    , optTesting        = argsTesting
+                    , optTesting        = IdeTesting argsTesting
                     , optThreads        = argsThreads
                     }
             debouncer <- newAsyncDebouncer
