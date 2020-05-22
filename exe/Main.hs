@@ -46,7 +46,7 @@ import System.IO
 import System.Exit
 import Paths_ghcide
 import Development.GitRev
-import Development.Shake (Action, Rules, action)
+import Development.Shake (Action, Rules)
 import qualified Data.HashSet as HashSet
 import qualified Data.Map.Strict as Map
 import HIE.Bios
@@ -104,7 +104,7 @@ main = do
                     , optThreads        = argsThreads
                     }
             debouncer <- newAsyncDebouncer
-            initialise caps (cradleRules >> mainRule >> pluginRules plugins >> action kick)
+            initialise caps (cradleRules >> mainRule >> pluginRules plugins)
                 getLspId event (logger minBound) debouncer options vfs
     else do
         -- GHC produces messages with UTF8 in them, so make sure the terminal doesn't error
@@ -175,12 +175,6 @@ expandFiles = concatMapM $ \x -> do
         when (null files) $
             fail $ "Couldn't find any .hs/.lhs files inside directory: " ++ x
         return files
-
-
-kick :: Action ()
-kick = do
-    files <- getFilesOfInterest
-    void $ uses TypeCheck $ HashSet.toList files
 
 -- | Print an LSP event.
 showEvent :: Lock -> FromServerMessage -> IO ()
