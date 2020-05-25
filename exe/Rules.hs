@@ -76,7 +76,7 @@ cradleToSession = define $ \LoadCradle nfp -> do
         sendEvent $ notifyCradleLoaded f
 
     -- Avoid interrupting `getComponentOptions` since it calls external processes
-    cmpOpts <- liftIO $ mask $ \_ -> getComponentOptions cradle
+    cmpOpts <- liftIO $ mask $ \_ -> getComponentOptions cradle f
     let opts = componentOptions cmpOpts
         deps = componentDependencies cmpOpts
         root = componentRoot cmpOpts
@@ -91,11 +91,11 @@ cradleToSession = define $ \LoadCradle nfp -> do
 cradleLoadedMethod :: Text
 cradleLoadedMethod = "ghcide/cradle/loaded"
 
-getComponentOptions :: Cradle a -> IO ComponentOptions
-getComponentOptions cradle = do
+getComponentOptions :: Cradle a -> FilePath -> IO ComponentOptions
+getComponentOptions cradle f = do
     let showLine s = putStrLn ("> " ++ s)
     -- WARNING 'runCradle is very expensive and must be called as few times as possible
-    cradleRes <- runCradle (cradleOptsProg cradle) showLine ""
+    cradleRes <- runCradle (cradleOptsProg cradle) showLine f
     case cradleRes of
         CradleSuccess r -> pure r
         CradleFail err  -> throwIO err

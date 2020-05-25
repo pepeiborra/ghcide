@@ -131,7 +131,7 @@ main = do
             cradle <- maybe (loadImplicitCradle $ addTrailingPathSeparator dir) loadCradle x
             when (isNothing x) $ print cradle
             putStrLn $ "\nStep 4/6, Cradle " ++ show i ++ "/" ++ show n ++ ": Loading GHC Session"
-            opts <- getComponentOptions cradle
+            opts <- getComponentOptions cradle ""
             createSession opts
 
         putStrLn "\nStep 5/6: Initializing the IDE"
