@@ -9,6 +9,7 @@
 module Development.IDE.Plugin.CodeAction
     (
       plugin
+    , commands
 
     -- * For haskell-language-server
     , codeAction
@@ -29,6 +30,7 @@ import Development.IDE.GHC.Error
 import Development.IDE.GHC.Util
 import Development.IDE.LSP.Server
 import Development.IDE.Plugin.CodeAction.PositionIndexed
+import Development.IDE.Plugin.CodeAction.Retrie
 import Development.IDE.Plugin.CodeAction.RuleTypes
 import Development.IDE.Plugin.CodeAction.Rules
 import Development.IDE.Types.Location
@@ -55,6 +57,7 @@ import Outputable (ppr, showSDocUnsafe)
 import DynFlags (xFlags, FlagSpec(..))
 import GHC.LanguageExtensions.Type (Extension)
 import System.Time.Extra (showDuration, duration)
+import Data.Functor ((<&>))
 
 plugin :: Plugin c
 plugin = codeActionPluginWithRules rules codeAction <> Plugin mempty setHandlersCodeLens
@@ -70,7 +73,7 @@ codeAction
     -> Range
     -> CodeActionContext
     -> IO (Either ResponseError [CAResult])
-codeAction lsp state (TextDocumentIdentifier uri) _range CodeActionContext{_diagnostics=List xs} = do
+codeAction lsp state (TextDocumentIdentifier uri) range CodeActionContext{_diagnostics=List xs} = do
     contents <- LSP.getVirtualFileFunc lsp $ toNormalizedUri uri
     let fp = uriToFilePath uri
         text = Rope.toText . (_text :: VirtualFile -> Rope.Rope) <$> contents
@@ -82,11 +85,14 @@ codeAction lsp state (TextDocumentIdentifier uri) _range CodeActionContext{_diag
               <*> use GhcSession `traverse` mbFile
       pkgExports <- runAction state $ (useNoFile_ . PackageExports) `traverse` env
       let dflags = hsc_dflags . hscEnv <$> env
-      pure $ Right
-          [ CACodeAction $ CodeAction title (Just CodeActionQuickFix) (Just $ List [x]) (Just edit) Nothing
-          | x <- xs, (title, tedit) <- suggestAction dflags (fromMaybe mempty pkgExports) ideOptions ( join parsedModule ) text x
-          , let edit = WorkspaceEdit (Just $ Map.singleton uri $ List tedit) Nothing
-          ]
+      refactorings <-
+          suggestRefactoring uri range (join parsedModule)
+      pure $ Right $
+          [ action
+          | x <- xs
+          , action <- suggestAction uri dflags (fromMaybe mempty pkgExports) ideOptions ( join parsedModule ) text x
+          ] ++
+          refactorings
 
 logAndRunRequest :: IdeState -> Maybe FilePath -> IO a -> IO a
 logAndRunRequest _de Nothing act = act
@@ -138,28 +144,45 @@ executeAddSignatureCommand _lsp _ideState ExecuteCommandParams{..}
     = return (Right Null, Nothing)
 
 suggestAction
-  :: Maybe DynFlags
+  :: Uri
+  -> Maybe DynFlags
   -> PackageExportsMap
   -> IdeOptions
   -> Maybe ParsedModule
   -> Maybe T.Text
   -> Diagnostic
-  -> [(T.Text, [TextEdit])]
-suggestAction dflags packageExports ideOptions parsedModule text diag = concat
-    [ suggestAddExtension diag
-    , suggestExtendImport dflags text diag
-    , suggestFillHole diag
-    , suggestFillTypeWildcard diag
-    , suggestFixConstructorImport text diag
-    , suggestModuleTypo diag
-    , suggestReplaceIdentifier text diag
-    , suggestSignature True diag
-    ] ++ concat
-    [  suggestNewDefinition ideOptions pm text diag
-    ++ suggestRemoveRedundantImport pm text diag
-    ++ suggestNewImport packageExports pm diag
-    | Just pm <- [parsedModule]]
+  -> [CAResult]
+suggestAction uri dflags packageExports ideOptions parsedModule text diag =
+    [ CACodeAction $ CodeAction title (Just CodeActionQuickFix) (Just $ List [diag]) (Just edit) Nothing
+    | (title, tedit) <- actions
+    , let edit = WorkspaceEdit (Just $ Map.singleton uri $ List tedit) Nothing
+    ]
+    where
+      actions =   concat
+        [ suggestAddExtension diag
+        , suggestExtendImport dflags text diag
+        , suggestFillHole diag
+        , suggestFillTypeWildcard diag
+        , suggestFixConstructorImport text diag
+        , suggestModuleTypo diag
+        , suggestReplaceIdentifier text diag
+        , suggestSignature True diag
+        ] ++ concat
+        [  suggestNewDefinition ideOptions pm text diag
+        ++ suggestRemoveRedundantImport pm text diag
+        ++ suggestNewImport packageExports pm diag
+        | Just pm <- [parsedModule]]
 
+commands :: [T.Text]
+commands = [retrieCommandName, "typesignature.add"]
+
+suggestRefactoring :: Uri -> Range -> Maybe ParsedModule -> IO [CAResult]
+suggestRefactoring uri range parsedModule = sequence
+    [ makeLspCommandId name <&> \c ->
+        CACodeAction $ CodeAction title (Just CodeActionRefactor) Nothing Nothing (Just $ Command title c params)
+    | Just nfp <- [uriToFilePath uri]
+    , Just pm <- [parsedModule]
+    , Command title name params <- suggestRewrites nfp range pm]
 
 suggestRemoveRedundantImport :: ParsedModule -> Maybe T.Text -> Diagnostic -> [(T.Text, [TextEdit])]
 suggestRemoveRedundantImport ParsedModule{pm_parsed_source = L _  HsModule{hsmodImports}} contents Diagnostic{_range=_range,..}
@@ -571,7 +594,9 @@ matchRegex message regex = case unifySpaces message =~~ regex of
 setHandlersCodeLens :: PartialHandlers c
 setHandlersCodeLens = PartialHandlers $ \WithMessage{..} x -> return x{
     LSP.codeLensHandler = withResponse RspCodeLens codeLens,
-    LSP.executeCommandHandler = withResponseAndRequest RspExecuteCommand ReqApplyWorkspaceEdit executeAddSignatureCommand
+    LSP.executeCommandHandler =
+        withResponseAndRequest RspExecuteCommand ReqApplyWorkspaceEdit
+            ( executeAddSignatureCommand `combineCommand` executeRetrieCommand)
     }
 
 filterNewlines :: T.Text -> T.Text
@@ -579,3 +604,10 @@ filterNewlines = T.concat  . T.lines
 
 unifySpaces :: T.Text -> T.Text
 unifySpaces    = T.unwords . T.words
+
+combineCommand :: Monad m => (t1 -> t2 -> t3 -> m (Either a1 Value, Maybe a2)) -> (t1 -> t2 -> t3 -> m (Either a1 Value, Maybe a2)) -> t1 -> t2 -> t3 -> m (Either a1 Value, Maybe a2)
+combineCommand c1 c2 lsp state param = do
+    v1 <- c1 lsp state param
+    case v1 of
+        (Right Null, Nothing) -> c2 lsp state param
+        other -> return other

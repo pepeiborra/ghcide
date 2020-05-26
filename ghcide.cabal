@@ -58,6 +58,7 @@ library
         prettyprinter-ansi-terminal,
         prettyprinter,
         regex-tdfa >= 1.3.1.0,
+        retrie,
         rope-utf16-splay,
         safe-exceptions,
         shake >= 0.18.4,
@@ -151,6 +152,7 @@ library
         Development.IDE.Spans.Documentation
         Development.IDE.Spans.Type
         Development.IDE.Plugin.CodeAction.PositionIndexed
+        Development.IDE.Plugin.CodeAction.Retrie
         Development.IDE.Plugin.CodeAction.Rules
         Development.IDE.Plugin.CodeAction.RuleTypes
         Development.IDE.Plugin.Completions.Logic

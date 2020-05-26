@@ -105,12 +105,13 @@ main = do
     whenJust argsCwd IO.setCurrentDirectory
 
     dir <- IO.getCurrentDirectory
-    command <- makeLspCommandId "typesignature.add"
+
+    commandNames <- mapM makeLspCommandId commands
 
     let plugins = Completions.plugin <> CodeAction.plugin
         onInitialConfiguration = const $ Right ()
         onConfigurationChange  = const $ Right ()
-        options = def { LSP.executeCommandCommands = Just [command]
+        options = def { LSP.executeCommandCommands = Just commandNames
                       , LSP.completionTriggerCharacters = Just "."
                       }
 
