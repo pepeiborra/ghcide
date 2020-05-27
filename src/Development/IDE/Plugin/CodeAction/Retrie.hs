@@ -1,6 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -12,19 +12,27 @@
 {-# OPTIONS -Wno-orphans #-}
 
 module Development.IDE.Plugin.CodeAction.Retrie
-  (executeRetrieCommand, suggestRewrites
-  , retrieCommandName
-  ) where
+  ( executeRetrieCommand,
+    suggestRewrites,
+    retrieCommandName,
+  )
+where
 
-import Control.Exception (try, Exception(..), throwIO)
+import Control.Exception (Exception (..), throwIO, try)
 import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Data.Aeson (FromJSON, ToJSON, Value (Null), fromJSON, toJSON)
+import Data.Aeson (Result (Success))
 import Data.Coerce
+import Data.Functor ((<&>))
 import qualified Data.HashMap.Strict as HM
+import Data.IORef (newIORef, readIORef)
 import Data.List (isSuffixOf)
 import Data.Maybe (listToMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text as T
+import Data.Text (Text)
+import qualified Data.Text.IO as Text
 import Data.Typeable (Typeable)
 import Development.IDE.Core.FileStore (getFileContents)
 import Development.IDE.Core.RuleTypes (GetModIface (..), GetModSummary (..), GhcSession (..), HiFileResult (..))
@@ -80,11 +88,8 @@ import Retrie.Rewrites
 import Retrie.Util (Verbosity (Loud))
 import StringBuffer (stringToStringBuffer)
 import System.Directory (makeAbsolute)
-import Data.Functor ((<&>))
-import Data.Aeson (toJSON, Value(Null), ToJSON, FromJSON, fromJSON)
-import Data.Aeson (Result(Success))
-import Data.Text (Text)
-import System.IO (stderr, hPutStrLn)
+import System.IO (hPutStrLn, stderr)
+import Data.IORef.Extra (atomicModifyIORef'_)
 
 retrieCommandName :: Text
 retrieCommandName = "retrieCommand"
@@ -99,23 +104,23 @@ data RunRetrieParams = RunRetrieParams
   deriving (Eq, Show, Generic, FromJSON, ToJSON)
 
 executeRetrieCommand :: a -> IdeState -> ExecuteCommandParams -> IO (Either ResponseError Value, Maybe (ServerMethod, ApplyWorkspaceEditParams))
-executeRetrieCommand lsp state ExecuteCommandParams{..}
-    -- _command is prefixed with a process ID, because certain clients
-    -- have a global command registry, and all commands must be
-    -- unique. And there can be more than one ghcide instance running
-    -- at a time against the same client.
-    | T.isSuffixOf retrieCommandName _command
-    , Just (List [edit]) <- _arguments
-    , Success wedit <- fromJSON edit
-    = executeRetrieCmd lsp state wedit
-    | otherwise
-    = return (Right Null, Nothing)
+executeRetrieCommand lsp state ExecuteCommandParams {..}
+  -- _command is prefixed with a process ID, because certain clients
+  -- have a global command registry, and all commands must be
+  -- unique. And there can be more than one ghcide instance running
+  -- at a time against the same client.
+  | T.isSuffixOf retrieCommandName _command,
+    Just (List [edit]) <- _arguments,
+    Success wedit <- fromJSON edit =
+    executeRetrieCmd lsp state wedit
+  | otherwise =
+    return (Right Null, Nothing)
 
 executeRetrieCmd :: a -> IdeState -> RunRetrieParams -> IO (Either ResponseError Value, Maybe (ServerMethod, ApplyWorkspaceEditParams))
 executeRetrieCmd _lsp state RunRetrieParams {..} = do
   let extendSource _ = return
   session <-
-    runAction  state
+    runAction state
       $ use_ GhcSession
       $ toNormalizedFilePath originatingFile
   edits <-
@@ -126,12 +131,12 @@ executeRetrieCmd _lsp state RunRetrieParams {..} = do
       rewrites
       (toNormalizedFilePath originatingFile)
   return $ case edits of
-    Left err@CallRetrieInternalError{} ->
-      ( Left (ResponseError InternalError (T.pack $ show err) Nothing), Nothing)
-    Left err@NoParse{} ->
-      ( Left (ResponseError ParseError (T.pack $ show err) Nothing), Nothing)
+    Left err@CallRetrieInternalError {} ->
+      (Left (ResponseError InternalError (T.pack $ show err) Nothing), Nothing)
+    Left err@NoParse {} ->
+      (Left (ResponseError ParseError (T.pack $ show err) Nothing), Nothing)
     Left err ->
-      ( Left (ResponseError InvalidParams (T.pack $ show err) Nothing), Nothing)
+      (Left (ResponseError InvalidParams (T.pack $ show err) Nothing), Nothing)
     Right edits ->
       ( Right Null,
         ((WorkspaceApplyEdit,) . ApplyWorkspaceEditParams <$> edits)
@@ -142,50 +147,48 @@ executeRetrieCmd _lsp state RunRetrieParams {..} = do
 suggestRewrites :: String -> Range -> ParsedModule -> [Command]
 suggestRewrites nfp range pm = commands
   where
-      ParsedModule {pm_mod_summary, pm_parsed_source} = pm
-      L _ HsModule {hsmodDecls} = pm_parsed_source
-      ModSummary {ms_mod} = pm_mod_summary
-
-      pos = _start range -- TODO actions for selections
-
-      topLevel =
-        listToMaybe
-          [ decl
-            | L l decl <- hsmodDecls,
-              pos `isInsideSrcSpan` l
-          ]
-      qualify x = prettyPrint ms_mod <> "." <> x
-      results = case topLevel of
-        Just (RuleD _ HsRules {rds_rules}) ->
-          concat
-            [ [ let rewrites =
-                      [RuleForward (qualify ruleName)]
-                 in ( "Apply rule " <> T.pack ruleName <> " forward",
-                      RunRetrieParams {..}
-                    ),
-                let rewrites =
-                      [RuleBackward (qualify ruleName)]
-                 in ( "Apply rule " <> T.pack ruleName <> " backwards",
-                      RunRetrieParams {..}
-                    )
-              ]
-              | L _ (HsRule _ (L _ (_, rn)) _ _ _ _ _) <- rds_rules,
-                let ruleName = unpackFS rn,
-                let originatingFile = nfp
+    ParsedModule {pm_mod_summary, pm_parsed_source} = pm
+    L _ HsModule {hsmodDecls} = pm_parsed_source
+    ModSummary {ms_mod} = pm_mod_summary
+    pos = _start range -- TODO actions for selections
+    topLevel =
+      listToMaybe
+        [ decl
+          | L l decl <- hsmodDecls,
+            pos `isInsideSrcSpan` l
+        ]
+    qualify x = prettyPrint ms_mod <> "." <> x
+    results = case topLevel of
+      Just (RuleD _ HsRules {rds_rules}) ->
+        concat
+          [ [ let rewrites =
+                    [RuleForward (qualify ruleName)]
+               in ( "Apply rule " <> T.pack ruleName <> " forward",
+                    RunRetrieParams {..}
+                  ),
+              let rewrites =
+                    [RuleBackward (qualify ruleName)]
+               in ( "Apply rule " <> T.pack ruleName <> " backwards",
+                    RunRetrieParams {..}
+                  )
             ]
-        Just (ValD _ FunBind {fun_id = L l' rdrName})
-          | pos `isInsideSrcSpan` l' ->
-            let pprName = prettyPrint rdrName
-                pprNameText = T.pack pprName
-                originatingFile = nfp
-             in [ let rewrites = [Unfold (qualify pprName)]
-                   in ("Unfold " <> pprNameText, RunRetrieParams {..}),
-                  let rewrites = [Fold (qualify pprName)]
-                   in ("Fold " <> pprNameText, RunRetrieParams {..})
-                ]
-        _ -> []
-      commands = results <&> \(title, params) ->
-        Command title retrieCommandName (Just $ List [toJSON params])
+            | L _ (HsRule _ (L _ (_, rn)) _ _ _ _ _) <- rds_rules,
+              let ruleName = unpackFS rn,
+              let originatingFile = nfp
+          ]
+      Just (ValD _ FunBind {fun_id = L l' rdrName})
+        | pos `isInsideSrcSpan` l' ->
+          let pprName = prettyPrint rdrName
+              pprNameText = T.pack pprName
+              originatingFile = nfp
+           in [ let rewrites = [Unfold (qualify pprName)]
+                 in ("Unfold " <> pprNameText, RunRetrieParams {..}),
+                let rewrites = [Fold (qualify pprName)]
+                 in ("Fold " <> pprNameText, RunRetrieParams {..})
+              ]
+      _ -> []
+    commands = results <&> \(title, params) ->
+      Command title retrieCommandName (Just $ List [toJSON params])
 
 -------------------------------------------------------------------------------
 data CallRetrieError
@@ -216,7 +219,9 @@ callRetrie extendSource state session rewrites origin = try $ do
         pm <-
           runAction state $
             useOrFail NoParse GetParsedModule f
-        fixFixities f (fixAnns pm)
+        (fixities, pm) <- fixFixities f (fixAnns pm)
+        pm <- extendSource f pm
+        return (fixities, pm)
       getCPPmodule t = do
         nt <- toNormalizedFilePath' <$> makeAbsolute t
         let getParsedModule f contents = do
@@ -229,18 +234,29 @@ callRetrie extendSource state session rewrites origin = try $ do
                           Just (stringToStringBuffer contents)
                       }
               (_, parsed) <- runGhcEnv session (parseModule ms')
-              extendSource nt =<< fixFixities f (fixAnns parsed)
+              (fixities, parsed) <- fixFixities f (fixAnns parsed)
+              parsed <- extendSource nt parsed
+              return (fixities, parsed)
 
-        (_, mbContents) <-
-          runAction state $ getFileContents nt
+        contents <- do
+          (_, mbContentsVFS) <- runAction state $ getFileContents nt
+          case mbContentsVFS of
+            Just contents -> return contents
+            Nothing -> Text.readFile (fromNormalizedFilePath nt)
 
-        forM mbContents $ \case
-          contents
-            | any (Text.isPrefixOf "#") (T.lines contents) ->
-              parseCPP (getParsedModule nt) contents
-            | otherwise -> do
-              pm <- reuseParsedModule nt
-              pure $ NoCPP pm
+        if any (Text.isPrefixOf "#") (T.lines contents)
+          then do
+            fixitiesRef <- newIORef mempty
+            let parseModule x = do
+                    (fix,res) <- getParsedModule nt x
+                    atomicModifyIORef'_ fixitiesRef (fix<>)
+                    return res
+            res <- parseCPP parseModule contents
+            fixities <- readIORef fixitiesRef
+            return (fixities, res)
+          else do
+            (fixities, pm) <- reuseParsedModule nt
+            return (fixities, NoCPP pm)
 
       -- retrie gives us an incomplete module path, e.g. 'Ide/Plugin/Retrie.hs'
       -- we'd need to look for it in all source folders, e.g. 'src/Ide/Plugin/Retrie.hs'
@@ -257,20 +273,16 @@ callRetrie extendSource state session rewrites origin = try $ do
   retrie <-
     apply
       <$> parseRewriteSpecs
-        (\f -> NoCPP <$> reuseParsedModule (findModule f))
-        dummyFixityEnv
+        (\f -> NoCPP . snd <$> reuseParsedModule (findModule f))
+        dummyFixityEnv -- TODO extract from GHC
         rewrites
 
   targets <- getTargetFiles retrieOptions (getGroundTerms retrie)
 
   replacements <- forM targets $ \t -> do
-    cpp <- getCPPmodule t
-    case cpp of
-      Nothing -> return NoChange
-      Just cpp -> do
-        let fixityEnv = mkFixityEnv [] -- TODO extract from GHC?
-        (_user, _ast, change) <- runRetrie fixityEnv retrie cpp
-        return change
+    (fixityEnv, cpp) <- getCPPmodule t
+    (_user, _ast, change) <- runRetrie fixityEnv retrie cpp
+    return change
 
   let edit = Just editParams
       editParams :: WorkspaceEdit
@@ -284,13 +296,15 @@ callRetrie extendSource state session rewrites origin = try $ do
     useOrFail mkException rule f =
       use rule f >>= maybe (liftIO $ throwIO $ mkException f) return
     fixFixities f pm = do
-        HiFileResult {hirModIface} <- runAction state $ useOrFail NoTypeCheck GetModIface f
-        let fixities = mkFixityEnv
-                [ (fs, (fs, fixity))
+      HiFileResult {hirModIface} <- runAction state $ useOrFail NoTypeCheck GetModIface f
+      let fixities =
+            mkFixityEnv
+              [ (fs, (fs, fixity))
                 | (n, fixity) <- mi_fixities hirModIface,
-                    let fs = occNameFS n
-                ]
-        transformA pm (fix fixities)
+                  let fs = occNameFS n
+              ]
+      res <- transformA pm (fix fixities)
+      return (fixities, res)
     fixAnns ParsedModule {..} =
       let ranns = relativiseApiAnns pm_parsed_source pm_annotations
        in unsafeMkA pm_parsed_source ranns 0
@@ -320,4 +334,3 @@ deriving instance Generic RewriteSpec
 deriving instance FromJSON RewriteSpec
 
 deriving instance ToJSON RewriteSpec
-
