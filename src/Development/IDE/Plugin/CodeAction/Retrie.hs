@@ -1,13 +1,13 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE FlexibleContexts   #-}
+{-# LANGUAGE LambdaCase         #-}
+{-# LANGUAGE NamedFieldPuns     #-}
+{-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE RecordWildCards    #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TupleSections      #-}
+{-# LANGUAGE TypeFamilies       #-}
 
 {-# OPTIONS -Wno-orphans #-}
 
@@ -18,78 +18,77 @@ module Development.IDE.Plugin.CodeAction.Retrie
   )
 where
 
-import Control.Exception (Exception (..), throwIO, try)
-import Control.Monad (forM)
-import Control.Monad.IO.Class (MonadIO (liftIO))
-import Data.Aeson (FromJSON, ToJSON, Value (Null), fromJSON, toJSON)
-import Data.Aeson (Result (Success))
-import Data.Coerce
-import Data.Functor ((<&>))
-import qualified Data.HashMap.Strict as HM
-import Data.IORef (newIORef, readIORef)
-import Data.List (isSuffixOf)
-import Data.Maybe (listToMaybe)
-import qualified Data.Text as Text
-import qualified Data.Text as T
-import Data.Text (Text)
-import qualified Data.Text.IO as Text
-import Data.Typeable (Typeable)
-import Development.IDE.Core.FileStore (getFileContents)
-import Development.IDE.Core.RuleTypes (GetModIface (..), GetModSummary (..), GhcSession (..), HiFileResult (..))
-import Development.IDE.Core.Rules
-import Development.IDE.Core.Shake (use, use_)
-import Development.IDE.GHC.Error
-  ( isInsideSrcSpan,
-    srcSpanToRange,
-  )
-import Development.IDE.GHC.Util (hscEnv, prettyPrint, runGhcEnv)
-import Development.IDE.Types.Location
-import GHC
-  ( HsBindLR (FunBind),
-    HsDecl (RuleD, ValD),
-    HsModule (..),
-    ParsedModule (..),
-    ParsedSource,
-    RuleDecl (HsRule),
-    RuleDecls (HsRules),
-    SrcSpan (..),
-    fun_id,
-    rds_rules,
-    srcSpanFile,
-  )
-import GHC (ModSummary (ms_hspp_buf))
-import GHC (parseModule)
-import GHC (HscEnv)
-import GHC (GenLocated (L))
-import GHC (ModSummary (ModSummary))
-import GHC (ModSummary (ms_mod))
-import GHC (ModIface_ (mi_fixities))
-import GHC.Generics (Generic)
-import GhcPlugins (occNameFS, unpackFS)
-import Language.Haskell.LSP.Types as J
-import Retrie.CPP (CPP (NoCPP), parseCPP)
-import Retrie.ExactPrint
-  ( Annotated,
-    fix,
-    relativiseApiAnns,
-    transformA,
-    unsafeMkA,
-  )
-import Retrie.Fixity (mkFixityEnv)
-import Retrie.Monad
-  ( apply,
-    getGroundTerms,
-    runRetrie,
-  )
-import Retrie.Options (defaultOptions, getTargetFiles)
-import qualified Retrie.Options as Retrie
-import Retrie.Replace (Change (..), Replacement (..))
-import Retrie.Rewrites
-import Retrie.Util (Verbosity (Loud))
-import StringBuffer (stringToStringBuffer)
-import System.Directory (makeAbsolute)
-import System.IO (hPutStrLn, stderr)
-import Data.IORef.Extra (atomicModifyIORef'_)
+import           Control.Exception              (Exception (..), throwIO, try)
+import           Control.Monad                  (when, forM)
+import           Control.Monad.IO.Class         (MonadIO (liftIO))
+import           Data.Aeson                     (FromJSON, ToJSON, Value (Null),
+                                                 fromJSON, toJSON)
+import           Data.Aeson                     (Result (Success))
+import           Data.Coerce
+import           Data.Functor                   ((<&>))
+import qualified Data.HashMap.Strict            as HM
+import           Data.IORef                     (newIORef, readIORef)
+import           Data.IORef.Extra               (atomicModifyIORef'_)
+import           Data.List                      (isSuffixOf)
+import           Data.Maybe                     (listToMaybe)
+import           Data.Text                      (Text)
+import qualified Data.Text                      as T
+import qualified Data.Text.IO                   as T
+import           Data.Typeable                  (Typeable)
+import           Development.IDE.Core.FileStore (getFileContents)
+import           Development.IDE.Core.RuleTypes (GetModIface (..),
+                                                 GetModSummary (..),
+                                                 GetParsedModule (..),
+                                                 GhcSession (..),
+                                                 HiFileResult (..))
+import           Development.IDE.Core.Service   (ideLogger, runAction)
+import           Development.IDE.Core.Shake     (IdeState, use, use_)
+import           Development.IDE.GHC.Error      (isInsideSrcSpan,
+                                                 srcSpanToRange)
+import           Development.IDE.GHC.Util       (hscEnv, prettyPrint, runGhcEnv)
+import           Development.IDE.Types.Location
+import           Development.IDE.Types.Logger
+import           GHC                            (HsBindLR (FunBind),
+                                                 HsDecl (RuleD, ValD),
+                                                 HsModule (..),
+                                                 ParsedModule (..),
+                                                 ParsedSource,
+                                                 RuleDecl (HsRule),
+                                                 RuleDecls (HsRules),
+                                                 SrcSpan (..), fun_id,
+                                                 rds_rules, srcSpanFile)
+import           GHC                            (GenLocated (L), HscEnv,
+                                                 ModIface_ (mi_fixities),
+                                                 ModSummary (ModSummary, ms_hspp_buf, ms_mod),
+                                                 parseModule)
+import           GHC.Generics                   (Generic)
+import           GhcPlugins                     (occNameFS, unpackFS)
+import           Language.Haskell.LSP.Types     (ApplyWorkspaceEditParams (..),
+                                                 Command, Command (..),
+                                                 ErrorCode (InternalError, InvalidParams, ParseError),
+                                                 ExecuteCommandParams (..),
+                                                 List (..), ResponseError (..),
+                                                 ServerMethod (WorkspaceApplyEdit),
+                                                 ServerMethod, TextEdit (..),
+                                                 WorkspaceEdit (..),
+                                                 toNormalizedFilePath)
+import           Retrie.CPP                     (CPP (NoCPP), parseCPP)
+import           Retrie.ExactPrint              (Annotated, fix,
+                                                 relativiseApiAnns, transformA,
+                                                 unsafeMkA)
+import           Retrie.Fixity                  (mkFixityEnv)
+import           Retrie.Monad                   (apply, getGroundTerms,
+                                                 runRetrie)
+import           Retrie.Options                 (defaultOptions, getTargetFiles)
+import qualified Retrie.Options                 as Retrie
+import           Retrie.Replace                 (Change (..), Replacement (..))
+import           Retrie.Rewrites
+import           Retrie.Util                    (Verbosity (Loud))
+import           StringBuffer                   (stringToStringBuffer)
+import           System.Directory               (makeAbsolute)
+import           System.IO                      (hPutStrLn, stderr)
+import Control.Exception.Safe (catch)
+import Control.Exception.Safe (SomeException)
 
 retrieCommandName :: Text
 retrieCommandName = "retrieCommand"
@@ -97,7 +96,7 @@ retrieCommandName = "retrieCommand"
 -- | Parameters for the runRetrie PluginCommand.
 data RunRetrieParams = RunRetrieParams
   { -- | rewrites for Retrie
-    rewrites :: [RewriteSpec],
+    rewrites        :: [RewriteSpec],
     -- | Originating file
     originatingFile :: String -- NormalizedFilePath
   }
@@ -194,12 +193,14 @@ suggestRewrites nfp range pm = commands
 data CallRetrieError
   = CallRetrieInternalError String NormalizedFilePath
   | NoParse NormalizedFilePath
+  | GHCParseError NormalizedFilePath String
   | NoTypeCheck NormalizedFilePath
   deriving (Eq, Typeable)
 
 instance Show CallRetrieError where
   show (CallRetrieInternalError msg f) = msg <> " - " <> fromNormalizedFilePath f
   show (NoParse f) = "Cannot parse: " <> fromNormalizedFilePath f
+  show (GHCParseError f m) = "Cannot parse " <> fromNormalizedFilePath f <> " : " <> m
   show (NoTypeCheck f) = "File does not typecheck: " <> fromNormalizedFilePath f
 
 instance Exception CallRetrieError
@@ -234,6 +235,7 @@ callRetrie extendSource state session rewrites origin = try $ do
                           Just (stringToStringBuffer contents)
                       }
               (_, parsed) <- runGhcEnv session (parseModule ms')
+                `catch` \e -> throwIO (GHCParseError nt (show @SomeException e))
               (fixities, parsed) <- fixFixities f (fixAnns parsed)
               parsed <- extendSource nt parsed
               return (fixities, parsed)
@@ -242,9 +244,8 @@ callRetrie extendSource state session rewrites origin = try $ do
           (_, mbContentsVFS) <- runAction state $ getFileContents nt
           case mbContentsVFS of
             Just contents -> return contents
-            Nothing -> Text.readFile (fromNormalizedFilePath nt)
-
-        if any (Text.isPrefixOf "#") (T.lines contents)
+            Nothing       -> T.readFile (fromNormalizedFilePath nt)
+        if any (T.isPrefixOf "#if" . T.toLower) (T.lines contents)
           then do
             fixitiesRef <- newIORef mempty
             let parseModule x = do
@@ -280,7 +281,9 @@ callRetrie extendSource state session rewrites origin = try $ do
   targets <- getTargetFiles retrieOptions (getGroundTerms retrie)
 
   replacements <- forM targets $ \t -> do
+    log $ "Parsing module" <> T.pack t
     (fixityEnv, cpp) <- getCPPmodule t
+    log $ "Transforming module" <> T.pack t
     (_user, _ast, change) <- runRetrie fixityEnv retrie cpp
     return change
 
@@ -289,10 +292,11 @@ callRetrie extendSource state session rewrites origin = try $ do
       editParams =
         WorkspaceEdit (Just $ HM.fromList $ asChanges replacements) Nothing
 
-  hPutStrLn stderr $ "Edits returned by retrie: " <> show edit
+  when (null replacements) $ log "done with no edits"
 
   return edit
   where
+    log msg = logDebug (ideLogger state) $ "[retrie] " <> msg
     useOrFail mkException rule f =
       use rule f >>= maybe (liftIO $ throwIO $ mkException f) return
     fixFixities f pm = do
@@ -319,8 +323,8 @@ asChanges cc = coerce $ HM.toList byModule
           | Change reps _ <- cc,
             Replacement {..} <- reps,
             s@(RealSrcSpan rspan) <- [replLocation],
-            let spanLoc = Text.pack $ unpackFS $ srcSpanFile rspan,
-            let edit = TextEdit (srcSpanToRange s) (Text.pack replReplacement)
+            let spanLoc = T.pack $ unpackFS $ srcSpanFile rspan,
+            let edit = TextEdit (srcSpanToRange s) (T.pack replReplacement)
         ]
 
 -------------------------------------------------------------------------------
