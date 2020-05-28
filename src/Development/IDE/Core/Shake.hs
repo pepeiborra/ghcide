@@ -880,6 +880,7 @@ vfsVersion WatchedFileVersion{} = Nothing
 
 modificationTime :: FileVersion -> Maybe (Int, Int)
 modificationTime VFSVersion{} = Nothing
+modificationTime WatchedFileVersion{} = Nothing
 modificationTime (ModificationTime large small) = Just (large, small)
 
 getDiagnosticsFromStore :: StoreItem -> [Diagnostic]
