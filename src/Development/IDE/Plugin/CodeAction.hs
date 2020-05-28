@@ -79,14 +79,15 @@ codeAction lsp state (TextDocumentIdentifier uri) range CodeActionContext{_diagn
         text = Rope.toText . (_text :: VirtualFile -> Rope.Rope) <$> contents
         mbFile = toNormalizedFilePath' <$> fp
     logAndRunRequest state fp $ do
-      (ideOptions, parsedModule, join -> env) <- runAction state $
-        (,,) <$> getIdeOptions
+      (ideOptions, parsedModule, typecheckedModule, join -> env) <- runAction state $
+        (,,,) <$> getIdeOptions
               <*> getParsedModule `traverse` mbFile
+              <*> getTypeCheckedModule `traverse` mbFile
               <*> use GhcSession `traverse` mbFile
       pkgExports <- runAction state $ (useNoFile_ . PackageExports) `traverse` env
       let dflags = hsc_dflags . hscEnv <$> env
       refactorings <-
-          suggestRefactoring uri range (join parsedModule)
+          suggestRefactoring uri range (tmrModule <$> join typecheckedModule)
       pure $ Right $
           [ action
           | x <- xs
@@ -176,7 +177,7 @@ suggestAction uri dflags packageExports ideOptions parsedModule text diag =
 commands :: [T.Text]
 commands = [retrieCommandName, "typesignature.add"]
 
-suggestRefactoring :: Uri -> Range -> Maybe ParsedModule -> IO [CAResult]
+suggestRefactoring :: Uri -> Range -> Maybe TypecheckedModule -> IO [CAResult]
 suggestRefactoring uri range parsedModule = sequence
     [ makeLspCommandId name <&> \c ->
         CACodeAction $ CodeAction title (Just CodeActionRefactor) Nothing Nothing (Just $ Command title c params)

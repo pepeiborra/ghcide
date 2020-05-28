@@ -23,6 +23,7 @@ module Development.IDE.Core.Rules(
     getDefinition,
     getDependencies,
     getParsedModule,
+    getTypeCheckedModule,
     generateCore,
     ) where
 
@@ -176,6 +177,9 @@ getPackageHieFile mod file = do
 -- | Parse the contents of a daml file.
 getParsedModule :: NormalizedFilePath -> Action (Maybe ParsedModule)
 getParsedModule file = use GetParsedModule file
+
+getTypeCheckedModule :: NormalizedFilePath -> Action (Maybe TcModuleResult)
+getTypeCheckedModule file = use TypeCheck file
 
 ------------------------------------------------------------
 -- Rules
