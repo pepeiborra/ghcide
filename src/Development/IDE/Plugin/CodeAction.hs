@@ -91,6 +91,7 @@ codeAction lsp state (TextDocumentIdentifier uri) _range CodeActionContext{_diag
 logAndRunRequest :: IdeState -> Maybe FilePath -> IO a -> IO a
 logAndRunRequest _de Nothing act = act
 logAndRunRequest ide (Just filepath) act = do
+    logInfo (ideLogger ide) $ "code action request in file: " <> T.pack filepath
     (t, res) <- duration act
     logInfo (ideLogger ide) $
         "code action request in file: " <> T.pack filepath <>
