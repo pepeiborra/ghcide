@@ -67,35 +67,18 @@ main = do
 
   runBenchmarks
     [ ---------------------------------------------------------------------------------------
-      bench "hover" 10 $ \doc ->
-        isJust <$> getHover doc (Position 853 12),
       ---------------------------------------------------------------------------------------
-      bench "getDefinition" 10 $ \doc ->
-        not . null <$> getDefinitions doc (Position 853 12),
-      ---------------------------------------------------------------------------------------
-      bench "documentSymbols" 100 $
-        fmap (either (not . null) (not . null)) . getDocumentSymbols,
-      ---------------------------------------------------------------------------------------
-      bench "documentSymbols after edit" 100 $ \doc -> do
+      bench "code actions after edit" 10 $ \doc -> do
+        let p = Position 853 24
         let change =
               TextDocumentContentChangeEvent
-                { _range = Just (Range (Position 854 23) (Position 854 23)),
+                { _range = Just (Range p p),
                   _rangeLength = Nothing,
-                  _text = " "
+                  _text = "a"
                 }
         changeDoc doc [change]
-        either (not . null) (not . null) <$> getDocumentSymbols doc,
-      ---------------------------------------------------------------------------------------
-      bench "completions after edit" 10 $ \doc -> do
-        let change =
-              TextDocumentContentChangeEvent
-                { _range = Just (Range (Position 854 23) (Position 854 23)),
-                  _rangeLength = Nothing,
-                  _text = " "
-                }
-        changeDoc doc [change]
-        not . null <$> getCompletions doc (Position 853 12),
-      ---------------------------------------------------------------------------------------
+        void (skipManyTill anyMessage message :: Session WorkDoneProgressEndNotification)
+        not . null <$> getCodeActions doc (Range p p),
       benchWithSetup
         "code actions"
         10
@@ -113,19 +96,7 @@ main = do
         ( \p doc -> do
             void (skipManyTill anyMessage message :: Session WorkDoneProgressEndNotification)
             not . null <$> getCodeActions doc (Range p p)
-        ),
-      ---------------------------------------------------------------------------------------
-      bench "code actions after edit" 10 $ \doc -> do
-        let p = Position 853 24
-        let change =
-              TextDocumentContentChangeEvent
-                { _range = Just (Range p p),
-                  _rangeLength = Nothing,
-                  _text = "a"
-                }
-        changeDoc doc [change]
-        void (skipManyTill anyMessage message :: Session WorkDoneProgressEndNotification)
-        not . null <$> getCodeActions doc (Range p p)
+        )
     ]
 
 type Experiment = TextDocumentIdentifier -> Session Bool
@@ -175,8 +146,7 @@ runBench Bench {..} =
     liftIO $ putStrLn $ "Running " <> name <> " benchmark"
     userState <- benchSetup doc
     (t, _) <- duration2 $ replicateM_ (fromIntegral samples) $ do
-      (t, res) <- duration2 $ experiment userState doc
-      unless res $ fail "DIDN'T WORK"
+      (t, res) <- duration2 $ withRetry $ experiment userState doc
       liftIO $ putStrLn $ showDuration t
 
     exitServer
@@ -237,3 +207,9 @@ duration2 x = do
 -- | Asks the server to shutdown and exit politely
 exitServer :: Session ()
 exitServer = request_ Shutdown (Nothing :: Maybe Value) >> sendNotification Exit ExitParams
+
+withRetry act = do
+    res <- act
+    unless res $ do
+        res <- act
+        unless res $ fail "DIDN'T WORK"
