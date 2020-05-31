@@ -666,20 +666,23 @@ getModSummaryRule = defineEarlyCutoff $ \GetModSummary f -> do
         Left diags -> return (Nothing, (diags, Nothing))
 
 getModIfaceRule :: Rules ()
-getModIfaceRule = define $ \GetModIface f -> do
+getModIfaceRule = defineEarlyCutoff $ \GetModIface f -> do
     fileOfInterest <- use_ IsFileOfInterest f
     let useHiFile =
           -- Never load interface files for files of interest
           not fileOfInterest
     mbHiFile <- if useHiFile then use GetModIfaceFromDisk f else return Nothing
     case mbHiFile of
-        Just x ->
-            return ([], Just x)
+        Just x -> do
+            let hash = fingerprintToBS $ getModuleHash $ hirModIface x
+            return (Just hash,([], Just x))
         Nothing
           | fileOfInterest -> do
             -- For files of interest only, create a Shake dependency on typecheck
             tmr <- use TypeCheck f
-            return ([], extract tmr)
+            let hiF = extract tmr
+            let !hash = fingerprintToBS . getModuleHash . hirModIface <$> hiF
+            return (hash ,([], hiF))
           | otherwise -> do
             -- the interface file does not exist or is out of date.
             -- Invoke typechecking directly to update it without incurring a dependency
@@ -700,16 +703,17 @@ getModIfaceRule = define $ \GetModIface f -> do
                     (_, (diagsNoHaddock, mb_pm)) <- liftIO $ getParsedModuleDefinition hsc opt comp_pkgs f contents
                     return (mergeParseErrorsHaddock diagsNoHaddock diags, mb_pm)
             case mb_pm of
-                Nothing -> return (diags, Nothing)
+                Nothing -> return (Nothing,(diags, Nothing))
                 Just pm -> do
                     (diags, mb_hsc) <- ghcSessionDepsDefinition f
                     case mb_hsc of
-                        Nothing -> return (diags, Nothing)
+                        Nothing -> return (Nothing, (diags, Nothing))
                         Just hsc -> do
                             (diags', tmr) <- typeCheckRuleDefinition (hscEnv hsc) pm DoGenerateInterfaceFiles
                             -- Bang pattern is important to avoid leaking 'tmr'
                             let !res = extract tmr
-                            return (diags <> diags', res)
+                                !hash = fingerprintToBS . getModuleHash . hirModIface <$> res
+                            return (hash,(diags <> diags', res))
     where
       extract Nothing = Nothing
       extract (Just tmr) =
