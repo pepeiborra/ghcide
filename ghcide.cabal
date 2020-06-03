@@ -58,7 +58,7 @@ library
         prettyprinter-ansi-terminal,
         prettyprinter,
         regex-tdfa >= 1.3.1.0,
-        retrie,
+        retrie >= 0.1.1.1,
         rope-utf16-splay,
         safe-exceptions,
         shake >= 0.18.4,
