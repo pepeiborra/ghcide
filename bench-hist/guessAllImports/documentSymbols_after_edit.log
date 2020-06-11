@@ -1,0 +1,3 @@
+name                       | success | samples | startup | setup | experiment | maxResidency
+-------------------------- | ------- | ------- | ------- | ----- | ---------- | ------------
+documentSymbols after edit | True    | 200     | 17.99s  | 0.00s | 8.46s      | 1196MB      

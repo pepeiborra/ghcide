@@ -1,0 +1,31 @@
+version, name, samples, startup, setup, experiment, maxResidency
+v0.1.0, hover, 100, 18.594840977, 0.0, 15.589651656000001, 871MB
+v0.1.0, edit, 100, 18.250408848000003, 0.0, 30.684850996, 1384MB
+v0.1.0, getDefinition, 100, 18.145507082, 0.0, 15.522850321000002, 889MB
+v0.1.0, hover after edit, 100, 18.035777963, 0.0, 38.667727419, 1578MB
+v0.1.0, code actions after edit, 100, 19.09711859, 0.0, 35.538294891, 1151MB
+interface_files, hover, 100, 14.687784179000001, 0.0, 16.822926024, 298MB
+interface_files, edit, 100, 14.553687744000001, 0.0, 34.391090956, 1211MB
+interface_files, getDefinition, 100, 14.464214989, 0.0, 16.565506335000002, 312MB
+interface_files, hover after edit, 100, 14.263889004000001, 0.0, 79.81896980500001, 1727MB
+interface_files, code actions after edit, 100, 14.37468291, 0.0, 39.974628315000004, 795MB
+spaceleaks_hashable, hover, 100, 14.243565518, 0.0, 18.565419595, 234MB
+spaceleaks_hashable, edit, 100, 15.269196102, 0.0, 32.424612479000004, 227MB
+spaceleaks_hashable, getDefinition, 100, 14.110913656000001, 0.0, 18.259730989, 233MB
+spaceleaks_hashable, hover after edit, 100, 14.073635500000002, 0.0, 80.29217339200001, 248MB
+spaceleaks_hashable, code actions after edit, 100, 14.131671463000002, 0.0, 40.162801028000004, 255MB
+v0.2.0, hover, 100, 14.651426800000001, 0.0, 25.137603964, 224MB
+v0.2.0, edit, 100, 14.190187544, 0.0, 39.913028633, 220MB
+v0.2.0, getDefinition, 100, 14.094230056, 0.0, 25.567169352, 225MB
+v0.2.0, hover after edit, 100, 14.265361679000002, 0.0, 90.970958881, 240MB
+v0.2.0, code actions after edit, 100, 14.100290369000001, 0.0, 47.362151286, 241MB
+shakeSession, hover, 100, 20.511456699, 0.0, 0.5758997490000001, 218MB
+shakeSession, edit, 100, 13.901458601000002, 0.0, 40.135883899, 215MB
+shakeSession, getDefinition, 100, 14.024168435, 0.0, 0.9461228570000001, 220MB
+shakeSession, hover after edit, 100, 14.528469943000001, 0.0, 90.13366750300001, 236MB
+shakeSession, code actions after edit, 100, 22.529117249000002, 0.0, 4.46338185, 241MB
+cacheGhcSession, hover, 100, 18.373079851, 0.0, 0.291776796, 390MB
+cacheGhcSession, edit, 100, 15.425287084, 0.0, 41.943161793, 392MB
+cacheGhcSession, getDefinition, 100, 14.84336137, 0.0, 0.243114617, 391MB
+cacheGhcSession, hover after edit, 100, 15.488172480000001, 0.0, 51.383704830000006, 395MB
+cacheGhcSession, code actions after edit, 100, 14.744366985000001, 0.0, 2.404918431, 418MB

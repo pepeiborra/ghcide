@@ -1,0 +1,18 @@
+Timed out waiting to receive a message from the server.
+Last message received:
+{
+    "tag": "NotWorkDoneProgressEnd",
+    "contents": {
+        "jsonrpc": "2.0",
+        "params": {
+            "value": {
+                "kind": "end"
+            },
+            "token": "4"
+        },
+        "method": "$/progress"
+    }
+}
+name                       | success | samples | startup | setup | experiment | maxResidency
+-------------------------- | ------- | ------- | ------- | ----- | ---------- | ------------
+documentSymbols after edit | False   | 200     | 0.00s   | 0.00s | 0.00s      | 0MB         

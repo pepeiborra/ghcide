@@ -1,0 +1,6 @@
+name, samples, startup, setup, experiment, maxResidency
+hover, 100, 14.651426800000001, 0.0, 25.137603964, 224MB
+edit, 100, 14.190187544, 0.0, 39.913028633, 220MB
+getDefinition, 100, 14.094230056, 0.0, 25.567169352, 225MB
+hover after edit, 100, 14.265361679000002, 0.0, 90.970958881, 240MB
+code actions after edit, 100, 14.100290369000001, 0.0, 47.362151286, 241MB

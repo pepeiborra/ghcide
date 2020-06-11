@@ -1,0 +1,3 @@
+name  | samples | startup | setup | experiment | maxResidency
+----- | ------- | ------- | ----- | ---------- | ------------
+hover | 100     | 14.65s  | 0.00s | 25.14s     | 224MB       
