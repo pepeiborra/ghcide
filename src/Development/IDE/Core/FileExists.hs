@@ -133,7 +133,7 @@ fileExistsRules getLspId ClientCapabilities{_workspace} vfs = do
   -- Create the global always, although it should only be used if we have fast rules.
   -- But there's a chance someone will send unexpected notifications anyway,
   -- e.g. https://github.com/digital-asset/ghcide/issues/599
-  addIdeGlobal . FileExistsMapVar =<< liftIO (newVar [])
+  addIdeGlobal . FileExistsMapVar =<< liftIO (newVar mempty)
   case () of
     _ | Just WorkspaceClientCapabilities{_didChangeWatchedFiles} <- _workspace
       , Just DidChangeWatchedFilesClientCapabilities{_dynamicRegistration} <- _didChangeWatchedFiles
