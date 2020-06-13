@@ -1,0 +1,25 @@
+version, name, success, samples, startup, setup, experiment, maxResidency
+upstream, hover, True, 100, 9.579799167000001, 0.0, 0.8191211070000001, 138MB
+upstream, edit, True, 100, 10.172980387, 0.0, 38.968433956000005, 141MB
+upstream, getDefinition, False, 100, 9.607221016, 0.0, 0.725756818, 138MB
+upstream, hover after edit, True, 100, 9.517759622, 0.0, 87.154347689, 157MB
+upstream, completions after edit, True, 100, 9.468027003000001, 0.0, 49.804893945, 143MB
+upstream, code actions, True, 100, 9.621001241, 0.37745519, 0.9691242430000001, 167MB
+upstream, code actions after edit, False, 100, 9.450162385, 0.0, 3.7569547770000002, 169MB
+upstream, documentSymbols after edit, True, 100, 9.588385175, 0.0, 2.946132684, 137MB
+module-ghc-session, hover, True, 100, 9.570196823, 0.0, 0.13558757400000002, 134MB
+module-ghc-session, edit, True, 100, 9.583554632, 0.0, 38.106044098000005, 141MB
+module-ghc-session, getDefinition, False, 100, 9.612387049, 0.0, 7.1623146e-2, 134MB
+module-ghc-session, hover after edit, True, 100, 9.770773678000001, 0.0, 46.803472152000005, 141MB
+module-ghc-session, completions after edit, True, 100, 9.571777050000001, 0.0, 48.513432224000006, 144MB
+module-ghc-session, code actions, True, 100, 9.661097461, 0.3710059, 0.961504801, 167MB
+module-ghc-session, code actions after edit, False, 100, 9.929021445, 0.0, 1.882371797, 170MB
+module-ghc-session, documentSymbols after edit, True, 100, 10.375426267, 0.0, 2.976412556, 137MB
+modsummary-ghc-session, hover, True, 100, 10.478386544000001, 0.0, 0.14032803300000002, 136MB
+modsummary-ghc-session, edit, True, 100, 9.612954298, 0.0, 31.76088757, 140MB
+modsummary-ghc-session, getDefinition, False, 100, 9.556752574, 0.0, 6.7428952e-2, 135MB
+modsummary-ghc-session, hover after edit, True, 100, 9.705769803, 0.0, 39.492055019000006, 141MB
+modsummary-ghc-session, completions after edit, True, 100, 9.522620569, 0.0, 41.953099058, 144MB
+modsummary-ghc-session, code actions, True, 100, 9.893884304, 0.546147088, 0.879603888, 171MB
+modsummary-ghc-session, code actions after edit, False, 100, 9.93654418, 0.0, 7.667484405000001, 171MB
+modsummary-ghc-session, documentSymbols after edit, True, 100, 12.153861614, 0.0, 3.876532918, 137MB
