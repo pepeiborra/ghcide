@@ -1,0 +1,9 @@
+name, success, samples, startup, setup, experiment, maxResidency
+hover, True, 100, 4.936755903, 0.0, 0.106990236, 137MB
+edit, True, 100, 4.876796657, 0.0, 25.626223022, 140MB
+getDefinition, False, 100, 4.966367976, 0.0, 4.8713046e-2, 137MB
+hover after edit, True, 100, 5.223419172000001, 0.0, 32.853958829, 146MB
+completions after edit, True, 100, 5.466737357, 0.0, 36.116149966, 144MB
+code actions, True, 100, 4.973735132000001, 0.259542588, 0.631066672, 168MB
+code actions after edit, False, 100, 5.251455428000001, 0.0, 3.3419174860000003, 176MB
+documentSymbols after edit, True, 100, 5.216930464000001, 0.0, 2.9538709990000003, 137MB
