@@ -1,0 +1,3 @@
+name                   | success | samples | startup | setup | experiment | maxResidency
+---------------------- | ------- | ------- | ------- | ----- | ---------- | ------------
+completions after edit | True    | 100     | 10.81s  | 0.00s | 44.00s     | 143MB       

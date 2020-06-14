@@ -1,0 +1,2 @@
+name, success, samples, startup, setup, experiment, maxResidency
+getDefinition, True, 100, 21.827025083000002, 0.0, 0.648860783, 318MB
