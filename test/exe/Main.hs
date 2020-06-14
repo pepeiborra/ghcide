@@ -2048,7 +2048,11 @@ cradleTests :: TestTree
 cradleTests = testGroup "cradle"
     [testGroup "dependencies" [sessionDepsArePickedUp]
     ,testGroup "loading" [loadCradleOnlyonce]
-    ,testGroup "multi"   [simpleMultiTest, simpleMultiTest2]
+    ,testGroup "multi"
+        [ simpleMultiTest
+        , simpleMultiTest2
+        , multiInstances
+        , multiInstances2]
     ]
 
 loadCradleOnlyonce :: TestTree
@@ -2167,6 +2171,12 @@ simpleMultiTest2 = testCase "simple-multi-test2" $ withoutStackEnv $ runWithExtr
     let fooL = mkL adoc 2 0 2 3
     checkDefs locs (pure [fooL])
     expectNoMoreDiagnostics 0.5
+
+multiInstances = testCase "multi-instances" $ withoutStackEnv $ runWithExtraFiles "multi" $ \dir -> do
+    let aPath = dir </> "a/A.hs"
+        bPath = dir </> "b/B.hs"
+    bSource <- liftIO $ readFileUtf8 bPath
+    bdoc <- createDoc bPath "haskell" bSource
 
 sessionDepsArePickedUp :: TestTree
 sessionDepsArePickedUp = testSession'
