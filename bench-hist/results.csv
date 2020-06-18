@@ -1,0 +1,25 @@
+version, name, success, samples, startup, setup, experiment, maxResidency
+v0.2.0, hover, True, 100, 14.394170665, 0.0, 24.670702076, 221MB
+v0.2.0, edit, True, 100, 14.588758346, 0.0, 39.140822085, 216MB
+v0.2.0, getDefinition, True, 100, 14.370890842000001, 0.0, 24.941496078, 225MB
+v0.2.0, hover after edit, True, 100, 15.952978611, 0.0, 86.938752988, 233MB
+v0.2.0, completions after edit, True, 100, 16.71917118, 0.0, 57.717503794, 229MB
+v0.2.0, code actions, True, 100, 15.671318299000001, 0.536564582, 1.7433635660000002, 266MB
+v0.2.0, code actions after edit, True, 100, 15.228639094000002, 0.0, 45.612601654, 246MB
+v0.2.0, documentSymbols after edit, True, 100, 14.862215587000001, 0.0, 3.223035083, 222MB
+upstream, hover, True, 100, 5.8482816820000005, 0.0, 4.9454744690000005, 134MB
+upstream, edit, True, 100, 5.31275002, 0.0, 37.709283213, 137MB
+upstream, getDefinition, True, 100, 5.155887724, 0.0, 5.071040086, 134MB
+upstream, hover after edit, True, 100, 5.644519141, 0.0, 43.601127911000006, 140MB
+upstream, completions after edit, True, 100, 5.398684477000001, 0.0, 46.015129607000006, 147MB
+upstream, code actions, False, 100, 5.466472249000001, 0.618790633, 0.8490837990000001, 34MB
+upstream, code actions after edit, True, 100, 5.246707075000001, 0.0, 37.09777081, 169MB
+upstream, documentSymbols after edit, True, 100, 5.580899209, 0.0, 3.5008937340000004, 19MB
+HEAD, hover, True, 100, 5.149210662000001, 0.0, 4.889111615, 169MB
+HEAD, edit, True, 100, 5.018361984, 0.0, 37.767128066000005, 170MB
+HEAD, getDefinition, True, 100, 5.035206842, 0.0, 5.522657187, 171MB
+HEAD, hover after edit, True, 100, 5.028756785000001, 0.0, 46.070039352, 172MB
+HEAD, completions after edit, True, 100, 5.142401647000001, 0.0, 48.040290077, 176MB
+HEAD, code actions, False, 100, 5.0633711550000005, 0.5794819330000001, 0.73311331, 102MB
+HEAD, code actions after edit, True, 100, 5.168948583000001, 0.0, 39.832205435000006, 201MB
+HEAD, documentSymbols after edit, False, 100, 5.080390604000001, 0.0, 5.228939e-3, 0MB

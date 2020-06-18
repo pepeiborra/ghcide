@@ -1,0 +1,3 @@
+name          | success | samples | startup | setup | experiment | maxResidency
+------------- | ------- | ------- | ------- | ----- | ---------- | ------------
+getDefinition | True    | 100     | 14.37s  | 0.00s | 24.94s     | 225MB       
