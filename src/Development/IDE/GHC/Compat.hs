@@ -32,9 +32,12 @@ module Development.IDE.GHC.Compat(
     pattern InstD,
     pattern TyClD,
     pattern ValD,
+    pattern SigD,
+    pattern TypeSig,
     pattern ClassOpSig,
     pattern IEThingAll,
     pattern IEThingWith,
+    pattern VarPat,
     GHC.ModLocation,
     Module.addBootSuffix,
     pattern ModLocation,
@@ -52,7 +55,18 @@ import Packages
 
 import qualified GHC
 import GHC hiding (
-      ClassOpSig, DerivD, ForD, IEThingAll, IEThingWith, InstD, TyClD, ValD, ModLocation
+      ClassOpSig,
+      DerivD,
+      ForD,
+      IEThingAll,
+      IEThingWith,
+      InstD,
+      TyClD,
+      ValD,
+      SigD,
+      TypeSig,
+      VarPat,
+      ModLocation
 #if MIN_GHC_API_VERSION(8,6,0)
     , getConArgs
 #endif
@@ -191,6 +205,31 @@ pattern IEThingAll a <-
 #else
     GHC.IEThingAll a
 #endif
+
+pattern SigD :: Sig p -> HsDecl p
+pattern SigD x <-
+#if MIN_GHC_API_VERSION(8,6,0)
+    GHC.SigD _ x
+#else
+    GHC.SigD x
+#endif
+
+pattern TypeSig :: [Located (IdP p)] -> LHsSigWcType p -> Sig p
+pattern TypeSig x y <-
+#if MIN_GHC_API_VERSION(8,6,0)
+    GHC.TypeSig _ x y
+#else
+    GHC.TypeSig x y
+#endif
+
+pattern VarPat :: Located (IdP p) -> Pat p
+pattern VarPat x <-
+#if MIN_GHC_API_VERSION(8,6,0)
+    GHC.VarPat _ x
+#else
+    GHC.VarPat x
+#endif
+
 
 setHieDir :: FilePath -> DynFlags -> DynFlags
 setHieDir _f d =
