@@ -31,6 +31,7 @@ data IdeGhcSession = IdeGhcSession
   { loadSessionFun :: FilePath -> IO (IdeResult HscEnvEq, HashSet FilePath)
   -- ^ Returns the Ghc session and the cradle dependencies
   , sessionVersion :: !Int
+  -- ^ Used as Shake key, versions must be unique and not reused
   }
 
 instance Show IdeGhcSession where show _ = "IdeGhcSession"
