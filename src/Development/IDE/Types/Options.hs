@@ -25,9 +25,10 @@ import qualified Language.Haskell.LSP.Types.Capabilities as LSP
 import qualified Data.Text as T
 import Development.IDE.Types.Diagnostics
 import Control.DeepSeq (NFData(..))
+import Data.HashSet (HashSet)
 
 data IdeGhcSession = IdeGhcSession
-  { loadSessionFun :: FilePath -> IO (IdeResult HscEnvEq, [FilePath])
+  { loadSessionFun :: FilePath -> IO (IdeResult HscEnvEq, HashSet FilePath)
   -- ^ Returns the Ghc session and the cradle dependencies
   , sessionVersion :: !Int
   }

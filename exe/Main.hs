@@ -18,7 +18,6 @@ import Control.Concurrent.Extra
 import Control.Exception.Safe
 import Control.Monad.Extra
 import Control.Monad.IO.Class
-import Data.Bifunctor (Bifunctor(second))
 import Data.Default
 import Data.Either
 import Data.Foldable (for_)
@@ -27,7 +26,6 @@ import Data.List.Extra
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Time.Clock (UTCTime)
 import Data.Version
 import Development.IDE.Core.Debouncer
 import Development.IDE.Core.FileStore
@@ -62,7 +60,6 @@ import Paths_ghcide
 import Development.GitRev
 import Development.Shake (Action)
 import qualified Data.HashSet as HashSet
-import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as Map
 import qualified Crypto.Hash.SHA1 as H
 import qualified Data.ByteString.Char8 as B
@@ -72,7 +69,6 @@ import GhcMonad
 import HscTypes (HscEnv(..), ic_dflags)
 import GHC hiding (def)
 import GHC.Check
-import Data.Either.Extra
 
 import HIE.Bios.Cradle
 import HIE.Bios.Types
@@ -253,13 +249,14 @@ loadSession dir = do
   installationCheck <- ghcVersionChecker libdir
 
   dummyAs <- async $ return (error "Uninitialised")
-  runningCradle <- newVar dummyAs :: IO (Var (Async (IdeResult HscEnvEq,[FilePath])))
+  runningCradle <- newVar dummyAs :: IO (Var (Async (IdeResult HscEnvEq, DependencyInfo)))
 
   case installationCheck of
     InstallationNotFound{..} ->
         error $ "GHC installation not found in libdir: " <> libdir
     InstallationMismatch{..} ->
-        return $ returnWithVersion $ \fp -> return (([renderPackageSetupException compileTime fp GhcVersionMismatch{..}], Nothing),[])
+        return $ returnWithVersion $ \fp ->
+            return (([renderPackageSetupException compileTime fp GhcVersionMismatch{..}], Nothing), mempty)
     InstallationChecked compileTime ghcLibCheck -> return $ do
       ShakeExtras{logger, eventer, restartShakeSession, withIndefiniteProgress} <- getShakeExtras
       IdeOptions{optTesting = IdeTesting optTesting} <- getIdeOptions
@@ -276,7 +273,7 @@ loadSession dir = do
             (df, targets) <- evalGhcEnv hscEnv $
                 setOptions opts (hsc_dflags hscEnv)
             let deps = componentDependencies opts ++ maybeToList hieYaml
-            dep_info <- getDependencyInfo deps
+                dep_info = getDependencyInfo deps
             -- Now lookup to see whether we are combining with an existing HscEnv
             -- or making a new one. The lookup returns the HscEnv and a list of
             -- information about other components loaded into the HscEnv
@@ -337,7 +334,7 @@ loadSession dir = do
                 pure (Map.insert hieYaml (newHscEnv, new_deps) m, (newHscEnv, head new_deps', tail new_deps'))
 
 
-      let session :: (Maybe FilePath, NormalizedFilePath, ComponentOptions) -> IO (IdeResult HscEnvEq,[FilePath])
+      let session :: (Maybe FilePath, NormalizedFilePath, ComponentOptions) -> IO (IdeResult HscEnvEq, DependencyInfo)
           session (hieYaml, cfp, opts) = do
             (hscEnv, new, old_deps) <- packageSetup (hieYaml, cfp, opts)
             -- Make a map from unit-id to DynFlags, this is used when trying to
@@ -355,15 +352,15 @@ loadSession dir = do
             -- which now uses the same EPS and so on
             cached_targets <- concatMapM (fmap fst . new_cache) old_deps
             modifyVar_ fileToFlags $ \var -> do
-                pure $ Map.insert hieYaml (HM.fromList (cs ++ cached_targets)) var
+                pure $ Map.insert hieYaml (HashSet.fromList (fst <$> cs ++ cached_targets)) var
 
             -- Invalidate all the existing GhcSession build nodes by restarting the Shake session
             invalidateShakeCache
             restartShakeSession [kick]
 
-            return (second Map.keys res)
+            return res
 
-      let consultCradle :: Maybe FilePath -> FilePath -> IO (IdeResult HscEnvEq, [FilePath])
+      let consultCradle :: Maybe FilePath -> FilePath -> IO (IdeResult HscEnvEq, DependencyInfo)
           consultCradle hieYaml cfp = do
              when optTesting $ eventer $ notifyCradleLoaded cfp
              logInfo logger $ T.pack ("Consulting the cradle for " <> show cfp)
@@ -383,42 +380,37 @@ loadSession dir = do
                  session (hieYaml, toNormalizedFilePath' cfp, opts)
                -- Failure case, either a cradle error or the none cradle
                Left err -> do
-                 dep_info <- getDependencyInfo (maybeToList hieYaml)
                  let ncfp = toNormalizedFilePath' cfp
                  let res = (map (renderCradleError ncfp) err, Nothing)
                  modifyVar_ fileToFlags $ \var -> do
-                   pure $ Map.insertWith HM.union hieYaml (HM.singleton ncfp (res, dep_info)) var
-                 return (res,[])
+                   pure $ Map.insertWith HashSet.union hieYaml (HashSet.singleton ncfp) var
+                 return (res,mempty)
 
       -- This caches the mapping from hie.yaml + Mod.hs -> [String]
       -- Returns the Ghc session and the cradle dependencies
-      let sessionOpts :: (Maybe FilePath, FilePath) -> IO (IdeResult HscEnvEq, [FilePath])
+      let sessionOpts :: (Maybe FilePath, FilePath) -> IO (IdeResult HscEnvEq, DependencyInfo)
           sessionOpts (hieYaml, file) = do
-            v <- fromMaybe HM.empty . Map.lookup hieYaml <$> readVar fileToFlags
+            v <- fromMaybe mempty . Map.lookup hieYaml <$> readVar fileToFlags
             cfp <- canonicalizePath file
-            case HM.lookup (toNormalizedFilePath' cfp) v of
-              Just (opts, old_di) -> do
-                deps_ok <- checkDependencyInfo old_di
-                if not deps_ok
-                  then do
-                    -- If the dependencies are out of date then clear both caches and start
-                    -- again.
+            case HashSet.member (toNormalizedFilePath' cfp) v of
+              True -> do
+                    -- Assume the dependencies are out of date
+                    -- clear both caches and start again.
                     modifyVar_ fileToFlags (const (return Map.empty))
                     -- Keep the same name cache
                     modifyVar_ hscEnvs (return . Map.adjust (\(h, _) -> (h, [])) hieYaml )
                     consultCradle hieYaml cfp
-                  else return (opts, Map.keys old_di)
-              Nothing -> consultCradle hieYaml cfp
+              False -> consultCradle hieYaml cfp
 
       -- The main function which gets options for a file. We only want one of these running
       -- at a time. Therefore the IORef contains the currently running cradle, if we try
       -- to get some more options then we wait for the currently running action to finish
       -- before attempting to do so.
-      let getOptions :: FilePath -> IO (IdeResult HscEnvEq, [FilePath])
+      let getOptions :: FilePath -> IO (IdeResult HscEnvEq, DependencyInfo)
           getOptions file = do
               hieYaml <- cradleLoc file
               sessionOpts (hieYaml, file) `catch` \e ->
-                  return (([renderPackageSetupException compileTime file e], Nothing),[])
+                  return (([renderPackageSetupException compileTime file e], Nothing), mempty)
 
       returnWithVersion $ \file -> do
         liftIO $ join $ mask_ $ modifyVar runningCradle $ \as -> do
@@ -523,9 +515,9 @@ renderCradleError nfp (CradleError _ec t) =
   ideErrorWithSource (Just "cradle") (Just DsError) nfp (T.unlines (map T.pack t))
 
 -- See Note [Multi Cradle Dependency Info]
-type DependencyInfo = Map.Map FilePath (Maybe UTCTime)
+type DependencyInfo = HashSet.HashSet FilePath
 type HieMap = Map.Map (Maybe FilePath) (HscEnv, [RawComponentInfo])
-type FlagsMap = Map.Map (Maybe FilePath) (HM.HashMap NormalizedFilePath (IdeResult HscEnvEq, DependencyInfo))
+type FlagsMap = Map.Map (Maybe FilePath) (HashSet.HashSet NormalizedFilePath)
 
 -- This is pristine information about a component
 data RawComponentInfo = RawComponentInfo
@@ -565,31 +557,8 @@ data ComponentInfo = ComponentInfo
   , componentDependencyInfo :: DependencyInfo
   }
 
--- | Check if any dependency has been modified lately.
-checkDependencyInfo :: DependencyInfo -> IO Bool
-checkDependencyInfo old_di = do
-  di <- getDependencyInfo (Map.keys old_di)
-  return (di == old_di)
-
--- Note [Multi Cradle Dependency Info]
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--- Why do we implement our own file modification tracking here?
--- The primary reason is that the custom caching logic is quite complicated and going into shake
--- adds even more complexity and more indirection. I did try for about 5 hours to work out how to
--- use shake rules rather than IO but eventually gave up.
-
--- | Computes a mapping from a filepath to its latest modification date.
--- See Note [Multi Cradle Dependency Info] why we do this ourselves instead
--- of letting shake take care of it.
-getDependencyInfo :: [FilePath] -> IO DependencyInfo
-getDependencyInfo fs = Map.fromList <$> mapM do_one fs
-
-  where
-    tryIO :: IO a -> IO (Either IOException a)
-    tryIO = try
-
-    do_one :: FilePath -> IO (FilePath, Maybe UTCTime)
-    do_one fp = (fp,) . eitherToMaybe <$> tryIO (getModificationTime fp)
+getDependencyInfo :: [FilePath] -> DependencyInfo
+getDependencyInfo = HashSet.fromList
 
 -- | This function removes all the -package flags which refer to packages we
 -- are going to deal with ourselves. For example, if a executable depends
