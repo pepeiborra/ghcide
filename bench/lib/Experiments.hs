@@ -11,7 +11,7 @@ module Experiments
 , experiments
 , configP
 , defConfig
-, output
+, outputConfig
 , setup
 , runBench
 , runBenchmarks
@@ -120,21 +120,6 @@ experiments =
 
 ---------------------------------------------------------------------------------------------
 
-examplePackageName :: HasConfig => String
-examplePackageName = name
-  where
-      (name, _, _) = examplePackageUsed ?config
-
-examplePackage :: HasConfig => String
-examplePackage = name <> "-" <> showVersion version
-  where
-      (name, version, _) = examplePackageUsed ?config
-
-exampleModulePath :: HasConfig => FilePath
-exampleModulePath = path
-  where
-      (_,_, path) = examplePackageUsed ?config
-
 examplesPath :: FilePath
 examplesPath = "bench/example"
 
@@ -151,7 +136,7 @@ data Config = Config
     repetitions :: Maybe Natural,
     ghcide :: FilePath,
     timeoutLsp :: Int,
-    examplePackageUsed :: (String, Version, String)
+    examples :: [Example]
   }
   deriving (Eq, Show)
 
@@ -182,9 +167,14 @@ configP =
     <*> optional (option auto (long "samples" <> metavar "NAT" <> help "override sampling count"))
     <*> strOption (long "ghcide" <> metavar "PATH" <> help "path to ghcide" <> value "ghcide")
     <*> option auto (long "timeout" <> value 60 <> help "timeout for waiting for a ghcide response")
-    <*> ( (,,) <$> strOption (long "example-package-name" <> value "Cabal")
-               <*> option versionP (long "example-package-version" <> value (makeVersion [3,2,0,0]))
-               <*> strOption (long "example-package-module" <> metavar "PATH" <> value "Distribution/Simple.hs"))
+    <*> (some
+          ( Example <$> strOption (long "example-package-name")
+               <*> option versionP (long "example-package-version" <> metavar "VERSION")
+               <*> strOption (long "example-package-module" <> metavar "PATH")
+          )
+         <|>
+           pure [Example "Cabal" (makeVersion [3,2,0,0]) "Distribution/Simple.hs"]
+        )
 
 versionP :: ReadM Version
 versionP = maybeReader $ extract . readP_to_S parseVersion
@@ -192,7 +182,10 @@ versionP = maybeReader $ extract . readP_to_S parseVersion
       extract parses = listToMaybe [ res | (res,"") <- parses]
 
 output :: (MonadIO m, HasConfig) => String -> m ()
-output = if quiet?config then (\_ -> pure ()) else liftIO . putStrLn
+output = outputConfig ?config
+
+outputConfig :: MonadIO m => Config -> String -> m ()
+outputConfig config = if quiet config then (\_ -> pure ()) else liftIO . putStrLn
 
 ---------------------------------------------------------------------------------------
 
@@ -206,6 +199,17 @@ data Bench = forall setup.
     benchSetup :: TextDocumentIdentifier -> Session setup,
     experiment :: setup -> Experiment
   }
+
+data Example = Example
+    { examplePackageName :: String
+    , examplePackageVersion :: Version
+    , exampleModulePath :: String
+    }
+    deriving (Eq, Show)
+
+examplePackage :: Example -> String
+examplePackage Example{..} =
+    examplePackageName <> "-" <> showVersion examplePackageVersion
 
 select :: HasConfig => Bench -> Bool
 select Bench {name, enabled} =
@@ -229,19 +233,26 @@ bench name defSamples userExperiment =
   where
     experiment () = userExperiment
 
-runBenchmarks :: HasConfig => [Bench] -> IO ()
-runBenchmarks allBenchmarks = do
-  let benchmarks = [ b{samples = fromMaybe (samples b) (repetitions ?config) }
-                   | b <- allBenchmarks
+runBenchmarks :: Config -> IO ()
+runBenchmarks config@Config{..} = do
+  let ?config = config
+  let benchmarks = [ b{samples = fromMaybe (samples b) repetitions }
+                   | b <- experiments
                    , select b ]
-  results <- forM benchmarks $ \b@Bench{name} ->
-                let run dir = runSessionWithConfig conf (cmd name dir) lspTestCaps dir
-                in (b,) <$> runBench run b
+  results <- forM examples $ \e ->
+                forM benchmarks $ \b@Bench{name} ->
+                    let run dir = runSessionWithConfig
+                                         conf
+                                         (cmd name dir)
+                                         lspTestCaps
+                                         dir
+                    in (b,e,) <$> runBench config run b e
 
   -- output raw data as CSV
-  let headers = ["name", "success", "samples", "startup", "setup", "experiment", "maxResidency"]
+  let headers = ["experiment", "example", "success", "samples", "startup", "setup", "experiment", "maxResidency"]
       rows =
         [ [ name,
+            examplePackage e <> "@" <> exampleModulePath e,
             show success,
             show samples,
             show startup,
@@ -249,11 +260,11 @@ runBenchmarks allBenchmarks = do
             show runExperiment,
             showMB maxResidency
           ]
-          | (Bench {name, samples}, BenchRun {..}) <- results,
+          | (Bench {name, samples}, e, BenchRun {..}) <- concat results,
             let runSetup' = if runSetup < 0.01 then 0 else runSetup
         ]
       csv = unlines $ map (intercalate ", ") (headers : rows)
-  writeFile (outputCSV ?config) csv
+  writeFile outputCSV csv
 
   -- print a nice table
   let pads = map (maximum . map length) (transpose (headers : rowsHuman))
@@ -261,6 +272,7 @@ runBenchmarks allBenchmarks = do
       outputRow = putStrLn . intercalate " | "
       rowsHuman =
         [ [ name,
+            examplePackage e <> "@" <> exampleModulePath e,
             show success,
             show samples,
             showDuration startup,
@@ -268,7 +280,7 @@ runBenchmarks allBenchmarks = do
             showDuration runExperiment,
             showMB maxResidency
           ]
-          | (Bench {name, samples}, BenchRun {..}) <- results,
+          | (Bench {name, samples}, e, BenchRun {..}) <- concat results,
             let runSetup' = if runSetup < 0.01 then 0 else runSetup
         ]
   outputRow paddedHeaders
@@ -278,28 +290,28 @@ runBenchmarks allBenchmarks = do
     gcStats name = escapeSpaces (name <> ".benchmark-gcStats")
     cmd name dir =
       unwords $
-        [ ghcide ?config,
+        [ ghcide,
           "--lsp",
           "--cwd",
           dir,
           "+RTS",
           "-S" <> gcStats name
         ]
-          ++ rtsOptions ?config
+          ++ rtsOptions
           ++ [ "-RTS"
              ]
           ++ concat
             [ ["--shake-profiling", path]
-              | Just path <- [shakeProfiling ?config]
+              | Just path <- [shakeProfiling]
             ]
     lspTestCaps =
       fullCaps {_window = Just $ WindowClientCapabilities $ Just True}
     conf =
       defaultConfig
-        { logStdErr = verbose ?config,
-          logMessages = verbose ?config,
+        { logStdErr = verbose config,
+          logMessages = verbose config,
           logColor = False,
-          messageTimeout = timeoutLsp ?config
+          messageTimeout = timeoutLsp
         }
 
 data BenchRun = BenchRun
@@ -317,11 +329,12 @@ waitForProgressDone :: Session ()
 waitForProgressDone =
       void(skipManyTill anyMessage message :: Session WorkDoneProgressEndNotification)
 
-runBench :: (?config::Config) => (String -> Session BenchRun -> IO BenchRun) -> Bench -> IO BenchRun
-runBench runSess Bench {..} = handleAny (\e -> print e >> return badRun)
+runBench :: Config -> (String -> Session BenchRun -> IO BenchRun) -> Bench -> Example -> IO BenchRun
+runBench config runSess Bench {..} ex = handleAny (\e -> print e >> return badRun)
   $ runSess dir
   $ do
-    doc <- openDoc exampleModulePath "haskell"
+    let ?config = config
+    doc <- openDoc (exampleModulePath ex) "haskell"
     (startup, _) <- duration $ do
       waitForProgressDone
       -- wait again, as the progress is restarted once while loading the cradle
@@ -353,17 +366,20 @@ runBench runSess Bench {..} = handleAny (\e -> print e >> return badRun)
 
     return BenchRun {..}
   where
-    dir = "bench/example/" <> examplePackage
+    dir = "bench/example/" <> examplePackage ex
     gcStats = escapeSpaces (name <> ".benchmark-gcStats")
 
-setup :: HasConfig => IO (IO ())
-setup = do
+setup :: Config -> IO (IO ())
+setup Config{..} = do
   alreadyExists <- doesDirectoryExist examplesPath
   when alreadyExists $ removeDirectoryRecursive examplesPath
-  let path = examplesPath </> examplePackage
-  case buildTool ?config of
+  let examplePackages = nub [(examplePackageName e, examplePackage e) | e <- examples]
+  forM_ examplePackages $ \(examplePackageName, examplePackage) ->
+    case buildTool of
       Cabal -> do
-        callCommand $ "cabal get -v0 " <> examplePackage <> " -d " <> examplesPath
+        let path = examplesPath </> examplePackage
+            cabalVerbosity = if verbosity /= All then "-v0" else ""
+        callCommand $ "cabal get " <> examplePackage <> " -d " <> examplesPath <> cabalVerbosity
         writeFile
             (path </> "hie.yaml")
             ("cradle: {cabal: {component: " <> show examplePackageName <> "}}")
@@ -375,7 +391,9 @@ setup = do
             (path </> "cabal.project.local")
             ""
       Stack -> do
-        callCommand $ "stack --silent unpack " <> examplePackage <> " --to " <> examplesPath
+        let path = examplesPath </> examplePackage
+            stackVerbosity = if verbosity /= All then "--silent" else ""
+        callCommand $ "stack " <> stackVerbosity <> " unpack " <> examplePackage <> " --to " <> examplesPath
         -- Generate the stack descriptor to match the one used to build ghcide
         stack_yaml <- fromMaybe "stack.yaml" <$> getEnv "STACK_YAML"
         stack_yaml_lines <- lines <$> readFile stack_yaml
@@ -395,7 +413,7 @@ setup = do
             (path </> "hie.yaml")
             ("cradle: {stack: {component: " <> show (examplePackageName <> ":lib") <> "}}")
 
-  whenJust (shakeProfiling ?config) $ createDirectoryIfMissing True
+  whenJust shakeProfiling $ createDirectoryIfMissing True
 
   return $ removeDirectoryRecursive examplesPath
 

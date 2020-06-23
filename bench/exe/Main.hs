@@ -41,10 +41,9 @@ import Options.Applicative
 main :: IO ()
 main = do
   config <- execParser $ info (configP <**> helper) fullDesc
-  let ?config = config
 
-  output "starting test"
+  outputConfig config "starting test"
 
-  cleanUp <- setup
+  cleanUp <- setup config
 
-  runBenchmarks experiments `finally` cleanUp
+  runBenchmarks config `finally` cleanUp
