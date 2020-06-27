@@ -29,14 +29,13 @@ import Development.IDE.GHC.Compat (hsmodExports, ParsedModule(..), ModSummary (m
 import Development.IDE.GHC.Util
 import Development.IDE.LSP.Server
 import System.Time.Extra (showDuration, duration)
+import Data.Maybe
 import Data.Text (pack)
 import Control.Monad.Trans.Except (runExceptT)
 import HscTypes (HscEnv(hsc_dflags))
-import Data.Maybe (fromJust)
 import Data.Functor ((<&>))
 
 #if !MIN_GHC_API_VERSION(8,6,0) || defined(GHC_LIB)
-import Data.Maybe
 import Development.IDE.Import.DependencyInformation
 #endif
 
