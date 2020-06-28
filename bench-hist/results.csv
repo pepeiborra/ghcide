@@ -1,0 +1,17 @@
+version, name, success, samples, startup, setup, experiment, maxResidency
+upstream, hover, True, 100, 10.000964431, 0.0, 0.441070864, 170MB
+upstream, edit, True, 100, 10.684809285, 0.0, 27.757133392, 168MB
+upstream, getDefinition, True, 100, 10.52725915, 0.0, 0.8384268300000001, 172MB
+upstream, hover after edit, True, 100, 10.222695908, 0.0, 35.27605837, 170MB
+upstream, completions after edit, True, 100, 10.079300106, 0.0, 38.186949398, 173MB
+upstream, code actions, True, 100, 10.000944527000001, 0.59697904, 0.68091352, 196MB
+upstream, code actions after edit, True, 100, 9.870548535000001, 0.0, 29.209360251000003, 197MB
+upstream, documentSymbols after edit, True, 100, 9.973052604000001, 0.0, 4.571069307, 170MB
+HEAD, hover, True, 100, 9.916935132, 0.0, 0.48269071300000005, 171MB
+HEAD, edit, True, 100, 10.892325944000001, 0.0, 29.814292458, 172MB
+HEAD, getDefinition, True, 100, 11.522601252000001, 0.0, 0.8449014170000001, 171MB
+HEAD, hover after edit, True, 100, 10.497113535, 0.0, 38.391144658, 178MB
+HEAD, completions after edit, True, 100, 10.005696135, 0.0, 41.423665788, 183MB
+HEAD, code actions, True, 100, 9.981281715000001, 0.9265053580000001, 0.905302617, 204MB
+HEAD, code actions after edit, True, 100, 10.058724974, 0.0, 31.147682330000002, 205MB
+HEAD, documentSymbols after edit, True, 100, 10.009694254000001, 0.0, 4.464170808, 170MB
