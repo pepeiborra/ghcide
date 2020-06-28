@@ -40,6 +40,7 @@ import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck
 import Data.Maybe
+import qualified Data.Text.IO as T
 
 main :: IO ()
 main = defaultMain $ testGroup "HIE"
@@ -60,6 +61,7 @@ main = defaultMain $ testGroup "HIE"
   , pluginTests
   , preprocessorTests
   , thTests
+  , ifaceTHTest
   , unitTests
   , haddockTests
   , positionMappingTests
@@ -1704,6 +1706,324 @@ haddockTests
   where
     checkHaddock s txt = spanDocToMarkdownForTest s @?= txt
 
+cradleTests :: TestTree
+cradleTests = testGroup "cradle"
+    [testGroup "dependencies" [sessionDepsArePickedUp]
+    ,testGroup "loading" [loadCradleOnlyonce]
+    ,testGroup "multi"   [simpleMultiTest, simpleMultiTest2]
+    ]
+
+loadCradleOnlyonce :: TestTree
+loadCradleOnlyonce = testGroup "load cradle only once"
+    [ testSession' "implicit" implicit
+    , testSession' "direct"   direct
+    ]
+    where
+        direct dir = do
+            liftIO $ writeFileUTF8 (dir </> "hie.yaml")
+                "cradle: {direct: {arguments: []}}"
+            test dir
+        implicit dir = test dir
+        test _dir = do
+            doc <- createDoc "B.hs" "haskell" "module B where\nimport Data.Foo"
+            msgs <- someTill (skipManyTill anyMessage cradleLoadedMessage) (skipManyTill anyMessage (message @PublishDiagnosticsNotification))
+            liftIO $ length msgs @?= 1
+            changeDoc doc [TextDocumentContentChangeEvent Nothing Nothing "module B where\nimport Data.Maybe"]
+            msgs <- manyTill (skipManyTill anyMessage cradleLoadedMessage) (skipManyTill anyMessage (message @PublishDiagnosticsNotification))
+            liftIO $ length msgs @?= 0
+            _ <- createDoc "A.hs" "haskell" "module A where\nimport LoadCradleBar"
+            msgs <- manyTill (skipManyTill anyMessage cradleLoadedMessage) (skipManyTill anyMessage (message @PublishDiagnosticsNotification))
+            liftIO $ length msgs @?= 0
+
+
+dependentFileTest :: TestTree
+dependentFileTest = testGroup "addDependentFile"
+    [testGroup "file-changed" [testSession' "test" test]
+    ]
+    where
+      test dir = do
+        -- If the file contains B then no type error
+        -- otherwise type error
+        liftIO $ writeFile (dir </> "dep-file.txt") "A"
+        let fooContent = T.unlines
+              [ "{-# LANGUAGE TemplateHaskell #-}"
+              , "module Foo where"
+              , "import Language.Haskell.TH.Syntax"
+              , "foo :: Int"
+              , "foo = 1 + $(do"
+              , "               qAddDependentFile \"dep-file.txt\""
+              , "               f <- qRunIO (readFile \"dep-file.txt\")"
+              , "               if f == \"B\" then [| 1 |] else lift f)"
+              ]
+        let bazContent = T.unlines ["module Baz where", "import Foo"]
+        _ <-createDoc "Foo.hs" "haskell" fooContent
+        doc <- createDoc "Baz.hs" "haskell" bazContent
+        expectDiagnostics
+          [("Foo.hs", [(DsError, (4, 6), "Couldn't match expected type")])]
+        -- Now modify the dependent file
+        liftIO $ writeFile (dir </> "dep-file.txt") "B"
+        let change = TextDocumentContentChangeEvent
+              { _range = Just (Range (Position 2 0) (Position 2 6))
+              , _rangeLength = Nothing
+              , _text = "f = ()"
+              }
+        -- Modifying Baz will now trigger Foo to be rebuilt as well
+        changeDoc doc [change]
+        expectDiagnostics [("Foo.hs", [])]
+
+
+cradleLoadedMessage :: Session FromServerMessage
+cradleLoadedMessage = satisfy $ \case
+        NotCustomServer (NotificationMessage _ (CustomServerMethod m) _) -> m == cradleLoadedMethod
+        _ -> False
+
+cradleLoadedMethod :: T.Text
+cradleLoadedMethod = "ghcide/cradle/loaded"
+
+-- Stack sets this which trips up cabal in the multi-component tests.
+-- However, our plugin tests rely on those env vars so we unset it locally.
+withoutStackEnv :: IO a -> IO a
+withoutStackEnv s =
+  bracket
+    (mapM getEnv vars >>= \prevState -> mapM_ unsetEnv vars >> pure prevState)
+    (\prevState -> mapM_ (\(var, value) -> restore var value) (zip vars prevState))
+    (const s)
+  where vars =
+          [ "GHC_PACKAGE_PATH"
+          , "GHC_ENVIRONMENT"
+          , "HASKELL_DIST_DIR"
+          , "HASKELL_PACKAGE_SANDBOX"
+          , "HASKELL_PACKAGE_SANDBOXES"
+          ]
+        restore var Nothing = unsetEnv var
+        restore var (Just val) = setEnv var val True
+
+simpleMultiTest :: TestTree
+simpleMultiTest = testCase "simple-multi-test" $ withoutStackEnv $ runWithExtraFiles "multi" $ \dir -> do
+    let aPath = dir </> "a/A.hs"
+        bPath = dir </> "b/B.hs"
+    aSource <- liftIO $ readFileUtf8 aPath
+    (TextDocumentIdentifier adoc) <- createDoc aPath "haskell" aSource
+    expectNoMoreDiagnostics 0.5
+    bSource <- liftIO $ readFileUtf8 bPath
+    bdoc <- createDoc bPath "haskell" bSource
+    expectNoMoreDiagnostics 0.5
+    locs <- getDefinitions bdoc (Position 2 7)
+    let fooL = mkL adoc 2 0 2 3
+    checkDefs locs (pure [fooL])
+    expectNoMoreDiagnostics 0.5
+
+-- Like simpleMultiTest but open the files in the other order
+simpleMultiTest2 :: TestTree
+simpleMultiTest2 = testCase "simple-multi-test2" $ withoutStackEnv $ runWithExtraFiles "multi" $ \dir -> do
+    let aPath = dir </> "a/A.hs"
+        bPath = dir </> "b/B.hs"
+    bSource <- liftIO $ readFileUtf8 bPath
+    bdoc <- createDoc bPath "haskell" bSource
+    expectNoMoreDiagnostics 5
+    aSource <- liftIO $ readFileUtf8 aPath
+    (TextDocumentIdentifier adoc) <- createDoc aPath "haskell" aSource
+    -- Need to have some delay here or the test fails
+    expectNoMoreDiagnostics 5
+    locs <- getDefinitions bdoc (Position 2 7)
+    let fooL = mkL adoc 2 0 2 3
+    checkDefs locs (pure [fooL])
+    expectNoMoreDiagnostics 0.5
+
+ifaceTests :: TestTree
+ifaceTests = testGroup "Interface loading tests"
+    [ -- https://github.com/digital-asset/ghcide/pull/645/
+      ifaceErrorTest
+    , ifaceErrorTest2
+    , ifaceErrorTest3
+    , ifaceTHTest
+    ]
+
+-- | test that TH reevaluates
+thReloadingTest :: TestTree
+thReloadingTest = testCase "reloading-th-test" $ withoutStackEnv $ runWithExtraFiles "TH" $ \dir -> do
+    let aPath = dir </> "THA.hs"
+        bPath = dir </> "THB.hs"
+        cPath = dir </> "THC.hs"
+
+    aSource <- liftIO $ readFileUtf8 aPath -- [TH] a :: ()
+    bSource <- liftIO $ readFileUtf8 bPath -- a :: ()
+    cSource <- liftIO $ readFileUtf8 cPath -- c = a :: ()
+
+    adoc <- createDoc aPath "haskell" aSource
+    bdoc <- createDoc bPath "haskell" bSource
+    cdoc <- createDoc cPath "haskell" cSource
+
+    expectDiagnostics [("THB.hs", [(DsWarning, (4,0), "Top-level binding")])]
+
+    -- Change [TH]a from () to Bool
+    let aSource' = T.unlines $ init (T.lines aSource) ++ ["th_a = [d| a = False|]"]
+    changeDoc adoc [TextDocumentContentChangeEvent Nothing Nothing aSource']
+
+    -- Check that the change propogates to C
+    expectDiagnostics
+      [("THC.hs", [(DsError, (4, 4), "Couldn't match expected type '()' with actual type 'Bool'")])]
+
+    closeDoc adoc
+    closeDoc bdoc
+    closeDoc cdoc
+
+-- | test that TH reevaluates across interfaces
+ifaceTHTest :: TestTree
+ifaceTHTest = testCase "iface-th-test" $ withoutStackEnv $ runWithExtraFiles "TH" $ \dir -> do
+    let aPath = dir </> "THA.hs"
+        bPath = dir </> "THB.hs"
+        cPath = dir </> "THC.hs"
+
+    aSource <- liftIO $ readFileUtf8 aPath -- [TH] a :: ()
+    _bSource <- liftIO $ readFileUtf8 bPath -- a :: ()
+    cSource <- liftIO $ readFileUtf8 cPath -- c = a :: ()
+
+    cdoc <- createDoc cPath "haskell" cSource
+
+    expectDiagnostics []
+
+    -- Change [TH]a from () to Bool
+    liftIO $ T.writeFile aPath (T.unlines $ init (T.lines aSource) ++ ["th_a = [d| a = False|]"])
+
+    -- Check that the change propogates to C
+    changeDoc cdoc [TextDocumentContentChangeEvent Nothing Nothing cSource]
+    expectDiagnostics
+      [("THC.hs", [(DsError, (4, 4), "Couldn't match expected type '()' with actual type 'Bool'")])
+      ,("THB.hs", [(DsWarning, (4,0), "Top-level binding")])]
+    closeDoc cdoc
+
+ifaceErrorTest :: TestTree
+ifaceErrorTest = testCase "iface-error-test-1" $ withoutStackEnv $ runWithExtraFiles "recomp" $ \dir -> do
+    let aPath = dir </> "A.hs"
+        bPath = dir </> "B.hs"
+        pPath = dir </> "P.hs"
+
+    aSource <- liftIO $ readFileUtf8 aPath -- x = y :: Int
+    bSource <- liftIO $ readFileUtf8 bPath -- y :: Int
+    pSource <- liftIO $ readFileUtf8 pPath -- bar = x :: Int
+
+    bdoc <- createDoc bPath "haskell" bSource
+    pdoc <- createDoc pPath "haskell" pSource
+    expectDiagnostics [("P.hs", [(DsWarning,(4,0), "Top-level binding")]) -- So what we know P has been loaded
+                      ]
+
+    -- Change y from Int to B
+    changeDoc bdoc [TextDocumentContentChangeEvent Nothing Nothing $ T.unlines ["module B where", "y :: Bool", "y = undefined"]]
+
+    -- Check that the error propogates to A
+    adoc <- createDoc aPath "haskell" aSource
+    expectDiagnostics
+      [("A.hs", [(DsError, (5, 4), "Couldn't match expected type 'Int' with actual type 'Bool'")])]
+    closeDoc adoc -- Close A
+
+    changeDoc pdoc [TextDocumentContentChangeEvent Nothing Nothing $ pSource <> "\nfoo = y :: Bool" ]
+    -- Now in P we have
+    -- bar = x :: Int
+    -- foo = y :: Bool
+    -- HOWEVER, in A...
+    -- x = y  :: Int
+    -- This is clearly inconsistent, and the expected outcome a bit surprising:
+    --   - The diagnostic for A has already been received. Ghcide does not repeat diagnostics
+    --   - P is being typechecked with the last successful artifacts for A.
+    expectDiagnostics [("P.hs", [(DsWarning,(4,0), "Top-level binding")])
+                      ,("P.hs", [(DsWarning,(6,0), "Top-level binding")])
+                      ]
+    expectNoMoreDiagnostics 2
+
+ifaceErrorTest2 :: TestTree
+ifaceErrorTest2 = testCase "iface-error-test-2" $ withoutStackEnv $ runWithExtraFiles "recomp" $ \dir -> do
+    let bPath = dir </> "B.hs"
+        pPath = dir </> "P.hs"
+
+    bSource <- liftIO $ readFileUtf8 bPath -- y :: Int
+    pSource <- liftIO $ readFileUtf8 pPath -- bar = x :: Int
+
+    bdoc <- createDoc bPath "haskell" bSource
+    pdoc <- createDoc pPath "haskell" pSource
+    expectDiagnostics [("P.hs", [(DsWarning,(4,0), "Top-level binding")]) -- So that we know P has been loaded
+                      ]
+
+    -- Change y from Int to B
+    changeDoc bdoc [TextDocumentContentChangeEvent Nothing Nothing $ T.unlines ["module B where", "y :: Bool", "y = undefined"]]
+
+    -- Add a new definition to P
+    changeDoc pdoc [TextDocumentContentChangeEvent Nothing Nothing $ pSource <> "\nfoo = y :: Bool" ]
+    -- Now in P we have
+    -- bar = x :: Int
+    -- foo = y :: Bool
+    -- HOWEVER, in A...
+    -- x = y  :: Int
+    expectDiagnostics
+    -- As in the other test, P is being typechecked with the last successful artifacts for A
+    -- (ot thanks to -fdeferred-type-errors)
+      [("A.hs", [(DsError, (5, 4), "Couldn't match expected type 'Int' with actual type 'Bool'")])
+      ,("P.hs", [(DsWarning,(4,0), "Top-level binding")])
+      ,("P.hs", [(DsWarning,(6,0), "Top-level binding")])
+      ]
+    expectNoMoreDiagnostics 2
+
+ifaceErrorTest3 :: TestTree
+ifaceErrorTest3 = testCase "iface-error-test-3" $ withoutStackEnv $ runWithExtraFiles "recomp" $ \dir -> do
+    let bPath = dir </> "B.hs"
+        pPath = dir </> "P.hs"
+
+    bSource <- liftIO $ readFileUtf8 bPath -- y :: Int
+    pSource <- liftIO $ readFileUtf8 pPath -- bar = x :: Int
+
+    bdoc <- createDoc bPath "haskell" bSource
+
+    -- Change y from Int to B
+    changeDoc bdoc [TextDocumentContentChangeEvent Nothing Nothing $ T.unlines ["module B where", "y :: Bool", "y = undefined"]]
+
+    -- P should not typecheck, as there are no last valid artifacts for A
+    _pdoc <- createDoc pPath "haskell" pSource
+
+    -- In this example the interface file for A should not exist (modulo the cache folder)
+    -- Despite that P still type checks, as we can generate an interface file for A thanks to -fdeferred-type-errors
+    expectDiagnostics
+      [("A.hs", [(DsError, (5, 4), "Couldn't match expected type 'Int' with actual type 'Bool'")])
+      ,("P.hs", [(DsWarning,(4,0), "Top-level binding")])
+      ]
+    expectNoMoreDiagnostics 2
+
+sessionDepsArePickedUp :: TestTree
+sessionDepsArePickedUp = testSession'
+  "session-deps-are-picked-up"
+  $ \dir -> do
+    liftIO $
+      writeFileUTF8
+        (dir </> "hie.yaml")
+        "cradle: {direct: {arguments: []}}"
+    -- Open without OverloadedStrings and expect an error.
+    doc <- createDoc "Foo.hs" "haskell" fooContent
+    expectDiagnostics
+      [("Foo.hs", [(DsError, (3, 6), "Couldn't match expected type")])]
+    -- Update hie.yaml to enable OverloadedStrings.
+    liftIO $
+      writeFileUTF8
+        (dir </> "hie.yaml")
+        "cradle: {direct: {arguments: [-XOverloadedStrings]}}"
+    -- Send change event.
+    let change =
+          TextDocumentContentChangeEvent
+            { _range = Just (Range (Position 4 0) (Position 4 0)),
+              _rangeLength = Nothing,
+              _text = "\n"
+            }
+    changeDoc doc [change]
+    -- Now no errors.
+    expectDiagnostics [("Foo.hs", [])]
+  where
+    fooContent =
+      T.unlines
+        [ "module Foo where",
+          "import Data.Text",
+          "foo :: Text",
+          "foo = \"hello\""
+        ]
+
+
 ----------------------------------------------------------------------
 -- Utils
 
@@ -1748,9 +2068,9 @@ run s = withTempDir $ \dir -> do
     conf = defaultConfig
       -- If you uncomment this you can see all logging
       -- which can be quite useful for debugging.
-      -- { logStdErr = True, logColor = False }
+      { logStdErr = True, logColor = False }
       -- If you really want to, you can also see all messages
-      -- { logMessages = True, logColor = False }
+      { logMessages = True, logColor = False }
 
 openTestDataDoc :: FilePath -> Session TextDocumentIdentifier
 openTestDataDoc path = do
