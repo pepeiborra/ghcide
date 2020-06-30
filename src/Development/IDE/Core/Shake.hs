@@ -814,43 +814,43 @@ defineEarlyCutoff
 defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
     extras@ShakeExtras{state, inProgress} <- getShakeExtras
     staleV <- liftIO $ getValues state key file
-    (if hasProgress key then withProgressVar inProgress file else id) $ do
-        val <- case old of
-            Just old | mode == RunDependenciesSame -> do
-                case staleV of
-                    -- No changes in the dependencies and we have
-                    -- an existing result.
-                    Just v -> return $ Just $ RunResult ChangedNothing old $ A v
-                    _ -> return Nothing
-            _ -> return Nothing
-        case val of
-            Just res -> return res
-            Nothing -> do
-                (bs, (diags, res)) <- actionCatch
-                    (do v <- op key file; liftIO $ evaluate $ force v) $
-                    \(e :: SomeException) -> pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
-                modTime <- liftIO $ (currentValue =<<) <$> getValues state GetModificationTime file
-                (bs, res) <- case res of
-                    Nothing -> do
-                        pure $ case staleV of
-                            Nothing -> (toShakeValue ShakeResult bs, Failed)
-                            Just v -> case v of
-                                Succeeded ver v -> (toShakeValue ShakeStale bs, Stale ver v)
-                                Stale ver v -> (toShakeValue ShakeStale bs, Stale ver v)
-                                Failed -> (toShakeValue ShakeResult bs, Failed)
-                    Just v -> pure (maybe ShakeNoCutoff ShakeResult bs, Succeeded (vfsVersion =<< modTime) v)
-                liftIO $ setValues state key file res
-                updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) diags
-                let eq = case (bs, fmap decodeShakeValue old) of
-                        (ShakeResult a, Just (ShakeResult b)) -> a == b
-                        (ShakeStale a, Just (ShakeStale b)) -> a == b
-                        -- If we do not have a previous result
-                        -- or we got ShakeNoCutoff we always return False.
-                        _ -> False
-                return $ RunResult
-                    (if eq then ChangedRecomputeSame else ChangedRecomputeDiff)
-                    (encodeShakeValue bs) $
-                    A res
+    let withProgress = if hasProgress key then withProgressVar inProgress file else id
+    val <- case old of
+        Just old | mode == RunDependenciesSame -> do
+            case staleV of
+                -- No changes in the dependencies and we have
+                -- an existing result.
+                Just v -> return $ Just $ RunResult ChangedNothing old $ A v
+                _ -> return Nothing
+        _ -> return Nothing
+    case val of
+        Just res -> return res
+        Nothing -> withProgress $ do
+            (bs, (diags, res)) <- actionCatch
+                (do v <- op key file; liftIO $ evaluate $ force v) $
+                \(e :: SomeException) -> pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
+            modTime <- liftIO $ (currentValue =<<) <$> getValues state GetModificationTime file
+            (bs, res) <- case res of
+                Nothing -> do
+                    pure $ case staleV of
+                        Nothing -> (toShakeValue ShakeResult bs, Failed)
+                        Just v -> case v of
+                            Succeeded ver v -> (toShakeValue ShakeStale bs, Stale ver v)
+                            Stale ver v -> (toShakeValue ShakeStale bs, Stale ver v)
+                            Failed -> (toShakeValue ShakeResult bs, Failed)
+                Just v -> pure (maybe ShakeNoCutoff ShakeResult bs, Succeeded (vfsVersion =<< modTime) v)
+            liftIO $ setValues state key file res
+            updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) diags
+            let eq = case (bs, fmap decodeShakeValue old) of
+                    (ShakeResult a, Just (ShakeResult b)) -> a == b
+                    (ShakeStale a, Just (ShakeStale b)) -> a == b
+                    -- If we do not have a previous result
+                    -- or we got ShakeNoCutoff we always return False.
+                    _ -> False
+            return $ RunResult
+                (if eq then ChangedRecomputeSame else ChangedRecomputeDiff)
+                (encodeShakeValue bs) $
+                A res
   where
     withProgressVar :: (Eq a, Hashable a) => Var (HMap.HashMap a Int) -> a -> Action b -> Action b
     withProgressVar var file = actionBracket (f succ) (const $ f pred) . const
