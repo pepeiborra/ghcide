@@ -805,6 +805,10 @@ usesWithStale key files = do
     values <- map (\(A value) -> value) <$> apply (map (Q . (key,)) files)
     zipWithM lastValue files values
 
+hasProgress :: Show k => k -> Bool
+hasProgress k =
+    -- don't do progress for GetFileExists, as there are lots of non-nodes for just that one key
+    show k /= "GetFileExists"
 
 defineEarlyCutoff
     :: IdeRule k v
@@ -813,8 +817,7 @@ defineEarlyCutoff
 defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
     extras@ShakeExtras{state, inProgress} <- getShakeExtras
     staleV <- liftIO $ getValues state key file
-    -- don't do progress for GetFileExists, as there are lots of non-nodes for just that one key
-    (if show key == "GetFileExists" then id else withProgressVar inProgress file) $ do
+    (if hasProgress key then withProgressVar inProgress file else id) $ do
         val <- case old of
             Just old | mode == RunDependenciesSame -> do
                 case staleV of
