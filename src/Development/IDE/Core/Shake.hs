@@ -693,7 +693,7 @@ defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old 
             Just res -> return res
             Nothing -> do
                 (bs, (diags, res)) <- actionCatch
-                    (do v <- op key file; liftIO $ evaluate $ force v) $
+                    (do v@(!_fp,_) <- op key file; pure v) $
                     \(e :: SomeException) -> pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
                 modTime <- liftIO $ (currentValue =<<) <$> getValues state GetModificationTime file
                 (bs, res) <- case res of
