@@ -677,13 +677,12 @@ defineEarlyCutoff
     => (k -> NormalizedFilePath -> Action (Maybe BS.ByteString, IdeResult v))
     -> Rules ()
 defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
-    extras@ShakeExtras{state, inProgress} <- getShakeExtras
-    -- don't do progress for GetFileExists, as there are lots of non-nodes for just that one key
-    (if show key == "GetFileExists" then id else withProgressVar inProgress file) $ do
+        extras@ShakeExtras{state, inProgress} <- getShakeExtras
+        values <- liftIO $ readVar state
+        staleV <-  pure $ getValuesPure key file values
         val <- case old of
             Just old | mode == RunDependenciesSame -> do
-                v <- liftIO $ getValues state key file
-                case v of
+                case staleV of
                     -- No changes in the dependencies and we have
                     -- an existing result.
                     Just v -> return $ Just $ RunResult ChangedNothing old $ A v
@@ -691,14 +690,13 @@ defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old 
             _ -> return Nothing
         case val of
             Just res -> return res
-            Nothing -> do
+            Nothing ->  (if hasProgress key then withProgressVar inProgress file else id) $ do
                 (bs, (diags, res)) <- actionCatch
                     (do v@(!_fp,_) <- op key file; pure v) $
                     \(e :: SomeException) -> pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
-                modTime <- liftIO $ (currentValue =<<) <$> getValues state GetModificationTime file
+                modTime <- pure $ (currentValue =<<) $ getValuesPure GetModificationTime file values
                 (bs, res) <- case res of
                     Nothing -> do
-                        staleV <- liftIO $ getValues state key file
                         pure $ case staleV of
                             Nothing -> (toShakeValue ShakeResult bs, Failed)
                             Just v -> case v of
