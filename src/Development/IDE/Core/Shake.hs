@@ -1049,6 +1049,9 @@ instance Hashable GetModificationTime where
 instance NFData   GetModificationTime
 instance Binary   GetModificationTime
 
+instance HasProgress GetModificationTime where
+    hasProgress _ = False
+
 pattern GetModificationTime :: GetModificationTime
 pattern GetModificationTime = GetModificationTime_ {missingFileDiagnostics=True}
 
