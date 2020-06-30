@@ -812,12 +812,12 @@ defineEarlyCutoff
     -> Rules ()
 defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
     extras@ShakeExtras{state, inProgress} <- getShakeExtras
+    staleV <- liftIO $ getValues state key file
     -- don't do progress for GetFileExists, as there are lots of non-nodes for just that one key
     (if show key == "GetFileExists" then id else withProgressVar inProgress file) $ do
         val <- case old of
             Just old | mode == RunDependenciesSame -> do
-                v <- liftIO $ getValues state key file
-                case v of
+                case staleV of
                     -- No changes in the dependencies and we have
                     -- an existing result.
                     Just v -> return $ Just $ RunResult ChangedNothing old $ A v
@@ -832,7 +832,6 @@ defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old 
                 modTime <- liftIO $ (currentValue =<<) <$> getValues state GetModificationTime file
                 (bs, res) <- case res of
                     Nothing -> do
-                        staleV <- liftIO $ getValues state key file
                         pure $ case staleV of
                             Nothing -> (toShakeValue ShakeResult bs, Failed)
                             Just v -> case v of
