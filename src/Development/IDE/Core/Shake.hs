@@ -81,7 +81,6 @@ import           Control.Concurrent.Async
 import           Control.Concurrent.Extra
 import           Control.Concurrent.STM.TQueue (flushTQueue, writeTQueue, readTQueue, newTQueue, TQueue)
 import           Control.Concurrent.STM (readTVar, writeTVar, newTVarIO, TVar, atomically)
-import           Control.DeepSeq
 import           Control.Exception.Extra
 import           System.Time.Extra
 import           Data.Typeable
@@ -306,27 +305,17 @@ deleteValue
 deleteValue IdeState{shakeExtras = ShakeExtras{state}} key file = modifyVar_ state $ \vals ->
     evaluate $ HMap.delete (file, Key key) vals
 
--- | We return Nothing if the rule has not run and Just Failed if it has failed to produce a value.
 getValues :: forall k v. IdeRule k v => Var Values -> k -> NormalizedFilePath -> IO (Maybe (Value v))
-getValues state key file = do
-    vs <- readVar state
+getValues state key file = getValuesPure key file <$> readVar state
+
+-- | We return Nothing if the rule has not run and Just Failed if it has failed to produce a value.
+getValuesPure :: forall k v. IdeRule k v => k -> NormalizedFilePath -> Values -> Maybe (Value v)
+getValuesPure key file vs =
     case HMap.lookup (file, Key key) vs of
-        Nothing -> pure Nothing
+        Nothing -> Nothing
         Just v -> do
             let r = fmap (fromJust . fromDynamic @v) v
-            -- Force to make sure we do not retain a reference to the HashMap
-            -- and we blow up immediately if the fromJust should fail
-            -- (which would be an internal error).
-            evaluate (r `seqValue` Just r)
-
--- | Seq the result stored in the Shake value. This only
--- evaluates the value to WHNF not NF. We take care of the latter
--- elsewhere and doing it twice is expensive.
-seqValue :: Value v -> b -> b
-seqValue v b = case v of
-    Succeeded ver v -> rnf ver `seq` v `seq` b
-    Stale ver v -> rnf ver `seq` v `seq` b
-    Failed -> b
+            r `seq` Just r
 
 -- | Open a 'IdeState', should be shut using 'shakeShut'.
 shakeOpen :: IO LSP.LspId
