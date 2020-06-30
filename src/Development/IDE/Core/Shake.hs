@@ -83,6 +83,7 @@ import qualified Data.SortedList as SL
 import           Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
 import Development.IDE.Types.Options
+import Development.IDE.Types.Progress
 import           Control.Concurrent.Async
 import           Control.Concurrent.Extra
 import           Control.Concurrent.STM.TQueue (flushTQueue, writeTQueue, readTQueue, newTQueue, TQueue)
@@ -270,6 +271,7 @@ mappingForVersion allMappings file ver =
 type IdeRule k v =
   ( Shake.RuleResult k ~ v
   , Shake.ShakeValue k
+  , HasProgress k
   , Show v
   , Typeable v
   , NFData v

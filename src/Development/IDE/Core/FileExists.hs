@@ -23,6 +23,7 @@ import           Development.IDE.Core.IdeConfiguration
 import           Development.IDE.Core.Shake
 import           Development.IDE.Types.Location
 import           Development.IDE.Types.Logger
+import           Development.IDE.Types.Progress
 import           Development.Shake
 import           Development.Shake.Classes
 import           GHC.Generics
@@ -74,6 +75,9 @@ data GetFileExists = GetFileExists
 instance NFData   GetFileExists
 instance Hashable GetFileExists
 instance Binary   GetFileExists
+
+instance HasProgress GetFileExists where
+    hasProgress _ = False
 
 -- | Returns True if the file exists
 --   Note that a file is not considered to exist unless it is saved to disk.
