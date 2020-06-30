@@ -807,11 +807,6 @@ usesWithStale key files = do
     values <- map (\(A value) -> value) <$> apply (map (Q . (key,)) files)
     zipWithM lastValue files values
 
-hasProgress :: Show k => k -> Bool
-hasProgress k =
-    -- don't do progress for GetFileExists, as there are lots of non-nodes for just that one key
-    show k /= "GetFileExists"
-
 defineEarlyCutoff
     :: IdeRule k v
     => (k -> NormalizedFilePath -> Action (Maybe BS.ByteString, IdeResult v))
