@@ -195,8 +195,8 @@ instance Hashable Key where
     hashWithSalt salt (Key key) = hashWithSalt salt (typeOf key, key)
 
 data Value v
-    = Succeeded TextDocumentVersion v
-    | Stale TextDocumentVersion v
+    = Succeeded !TextDocumentVersion v
+    | Stale !TextDocumentVersion v
     | Failed
     deriving (Functor, Generic, Show)
 
