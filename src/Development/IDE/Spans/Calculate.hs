@@ -87,7 +87,7 @@ getSpanInfo mods tcm@TypecheckedModule{..} parsedDeps =
 
      -- Batch extraction of kinds
      let typeNames = nubOrd [ n | (Named n, _) <- tts]
-     kinds <- Map.fromList . zip typeNames <$> mapM lookupKind typeNames
+     kinds <- Map.fromList . zip typeNames <$> mapM (lookupKind thisMod) typeNames
      let withKind (Named n, x) =
             (Named n, x, join $ Map.lookup n kinds)
          withKind (other, x) =
@@ -117,15 +117,9 @@ getSpanInfo mods tcm@TypecheckedModule{..} parsedDeps =
         addEmptyInfo = map (\(a,b) -> (a,b,Nothing))
         constraintToInfo (sp, ty) = (SpanS sp, sp, Just ty)
 
-lookupKind :: GhcMonad m => Name -> m (Maybe Type)
-lookupKind =
--- lookupName goes through the GHCi codepaths which cause problems on ghc-lib.
--- See https://github.com/digital-asset/daml/issues/4152 for more details.
-#ifdef GHC_LIB
-    pure Nothing
-#else
-    fmap (either (const Nothing) (safeTyThingType =<<)) . catchSrcErrors "span" . lookupName
-#endif
+lookupKind :: GhcMonad m => Module -> Name -> m (Maybe Type)
+lookupKind mod =
+    fmap (either (const Nothing) (safeTyThingType =<<)) . catchSrcErrors "span" . (fmap.fmap) head . lookupNames mod . (:[])
 
 -- | The locations in the typechecked module are slightly messed up in some cases (e.g. HsMatchContext always
 -- points to the first match) whereas the parsed module has the correct locations.

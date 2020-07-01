@@ -36,6 +36,7 @@ import Coercion
 import Language.Haskell.LSP.Types
 import Language.Haskell.LSP.Types.Capabilities
 import qualified Language.Haskell.LSP.VFS as VFS
+import Development.IDE.Core.Compile
 import Development.IDE.Plugin.Completions.Types
 import Development.IDE.Spans.Documentation
 import Development.IDE.GHC.Error
@@ -251,11 +252,11 @@ cacheDataProducer packageState tm deps = do
         case lookupTypeEnv typeEnv n of
           Just tt -> case safeTyThingId tt of
             Just var -> (\x -> ([x],mempty)) <$> varToCompl var
-            Nothing -> (\x -> ([x],mempty)) <$> toCompItem curModName n
-          Nothing -> (\x -> ([x],mempty)) <$> toCompItem curModName n
+            Nothing -> (\x -> ([x],mempty)) <$> toCompItem curMod curModName n
+          Nothing -> (\x -> ([x],mempty)) <$> toCompItem curMod curModName n
       getComplsForOne (GRE n _ False prov) =
         flip foldMapM (map is_decl prov) $ \spec -> do
-          compItem <- toCompItem (is_mod spec) n
+          compItem <- toCompItem curMod (is_mod spec) n
           let unqual
                 | is_qual spec = []
                 | otherwise = [compItem]
@@ -274,18 +275,12 @@ cacheDataProducer packageState tm deps = do
         docs <- evalGhcEnv packageState $ getDocumentationTryGhc curMod (tm_parsed_module tm : deps) name
         return $ CI name (showModName curModName) typ label Nothing docs
 
-      toCompItem :: ModuleName -> Name -> IO CompItem
-      toCompItem mn n = do
+      toCompItem :: Module -> ModuleName -> Name -> IO CompItem
+      toCompItem m mn n = do
         docs <- evalGhcEnv packageState $ getDocumentationTryGhc curMod (tm_parsed_module tm : deps) n
--- lookupName uses runInteractiveHsc, i.e., GHCi stuff which does not work with GHCi
--- and leads to fun errors like "Cannot continue after interface file error".
-#ifdef GHC_LIB
-        let ty = Right Nothing
-#else
         ty <- evalGhcEnv packageState $ catchSrcErrors "completion" $ do
-                name' <- lookupName n
+                name' <- fmap head <$> lookupNames m [n]
                 return $ name' >>= safeTyThingType
-#endif
         return $ CI n (showModName mn) (either (const Nothing) id ty) (T.pack $ showGhc n) Nothing docs
 
   (unquals,quals) <- getCompls rdrElts
