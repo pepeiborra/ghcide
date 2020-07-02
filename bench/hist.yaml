@@ -10,14 +10,7 @@ outputFolder: bench-hist
 
 # The set of experiments to execute
 experiments:
-    - hover
     - edit
-    - getDefinition
-    - "hover after edit"
-    - "completions after edit"
-    - "code actions"
-    - "code actions after edit"
-    - "documentSymbols after edit"
 
 # An ordered list of versions to analyze
 versions:
@@ -38,5 +31,12 @@ versions:
 # - v0.1.0
 # - v0.2.0
 - upstream: upstream/master
+- HEAD~8
+- HEAD~7
+- HEAD~6
+- HEAD~5
+- HEAD~4
+- HEAD~3
+- HEAD~2
+- HEAD~1
 - HEAD
-
