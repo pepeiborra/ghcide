@@ -28,7 +28,8 @@ module Development.IDE.GHC.Util(
     setHieDir,
     dontWriteHieFiles,
     -- * Missing upstream
-    getDocsBatch
+    getDocsBatch,
+    lookupNames
     ) where
 
 import Control.Concurrent
@@ -79,6 +80,8 @@ import LoadIface (loadModuleInterface)
 
 import Development.IDE.GHC.Compat as GHC
 import Development.IDE.Types.Location
+import TcRnTypes (TcTyThing(..))
+import TcEnv (tcLookup)
 
 
 ----------------------------------------------------------------------
@@ -330,3 +333,17 @@ getDocsBatch names = withSession $ \hsc_env -> liftIO $ do
       case nameSrcLoc n of
         RealSrcLoc {} -> False
         UnhelpfulLoc {} -> True
+
+-- Batch version of 'InteractiveEval.lookupName'
+-- TODO port upstream
+lookupNames :: (GhcMonad m, Traversable t) => t Name -> m (t TyThing)
+lookupNames names = withSession $ \hsc_env -> liftIO $ do
+    runInteractiveHsc hsc_env $  do
+        hsc_env <- getHscEnv
+        ioMsgMaybe $ runTcInteractive hsc_env $ forM names $ \name -> do
+            tcthing <- tcLookup name
+            case tcthing of
+                AGlobal thing    -> return thing
+                ATcId{tct_id=id} -> return (AnId id)
+                _ -> error "tcRnLookupName'"
+
