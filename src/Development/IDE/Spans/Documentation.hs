@@ -22,6 +22,13 @@ import           Development.IDE.GHC.Util
 import           Development.IDE.Spans.Common
 import           FastString
 import SrcLoc
+import Debug.Trace (traceShowM)
+import Data.Bifunctor (Bifunctor(bimap))
+
+showGDF :: GetDocsFailure -> String
+showGDF InteractiveName = "InteractiveName"
+showGDF (NameHasNoModule n) = "NameHasNoModule " <> prettyPrint n
+showGDF (NoDocsInIface m _) = "NoDocsInIface " <> prettyPrint m
 
 getDocumentationTryGhc :: GhcMonad m => [ParsedModule] -> Name -> m SpanDoc
 getDocumentationTryGhc deps n = head <$> getDocumentationsTryGhc deps [n]
@@ -32,6 +39,7 @@ getDocumentationsTryGhc :: GhcMonad m => [ParsedModule] -> [Name] -> m [SpanDoc]
 #if MIN_GHC_API_VERSION(8,6,0) && !defined(GHC_LIB)
 getDocumentationsTryGhc sources names = do
   res <- catchSrcErrors "docs" $ getDocsBatch names
+  traceShowM ("getDocsGbl", show $ bimap (map (\x -> x)) (fmap $ bimap showGDF length) res)
   case res of
       Left _ -> return $ map (SpanDocText . getDocumentation sources) names
       Right res -> return $ zipWith unwrap res names
