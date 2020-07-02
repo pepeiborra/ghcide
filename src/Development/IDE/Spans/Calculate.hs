@@ -87,9 +87,9 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
 
      -- Batch extraction of kinds
      let typeNames = nubOrd [ n | (Named n, _) <- tts]
-     kinds <- Map.fromList . zip typeNames <$> mapM (lookupKind thisMod) typeNames
+     kinds <- Map.fromList . zip typeNames . fromMaybe [] <$> lookupKinds thisMod typeNames
      let withKind (Named n, x) =
-            (Named n, x, join $ Map.lookup n kinds)
+            (Named n, x, Map.lookup n kinds)
          withKind (other, x) =
             (other, x, Nothing)
      tts <- pure $ map withKind tts
@@ -117,10 +117,9 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
         addEmptyInfo = map (\(a,b) -> (a,b,Nothing))
         constraintToInfo (sp, ty) = (SpanS sp, sp, Just ty)
 
-lookupKind :: GhcMonad m => Module -> Name -> m (Maybe Type)
-lookupKind mod =
-    fmap (either (const Nothing) (safeTyThingType =<<)) . catchSrcErrors "span" . (fmap.fmap) head . lookupNames mod . (:[])
-
+lookupKinds :: GhcMonad m => Module -> [Name] -> m (Maybe [Type])
+lookupKinds mod =
+    fmap (either (const Nothing) (mapM safeTyThingType =<<)) . catchSrcErrors "span" . lookupNames mod
 -- | The locations in the typechecked module are slightly messed up in some cases (e.g. HsMatchContext always
 -- points to the first match) whereas the parsed module has the correct locations.
 -- Therefore we build up a map from OccName to the corresponding definition in the parsed module
