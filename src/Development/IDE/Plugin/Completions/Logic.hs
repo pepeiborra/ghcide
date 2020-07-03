@@ -236,8 +236,9 @@ cacheDataProducer packageState tm deps = do
       -- The given namespaces for the imported modules (ie. full name, or alias if used)
       allModNamesAsNS = map (showModName . asNamespace) importDeclerations
 
-      typeEnv = tcg_type_env $ fst $ tm_internals_ tm
-      rdrEnv = tcg_rdr_env $ fst $ tm_internals_ tm
+      gblEnv = fst $ tm_internals_ tm
+      typeEnv = tcg_type_env gblEnv
+      rdrEnv = tcg_rdr_env gblEnv
       rdrElts = globalRdrEnvElts rdrEnv
 
       foldMapM :: (Foldable f, Monad m, Monoid b) => (a -> m b) -> f a -> m b
@@ -252,11 +253,11 @@ cacheDataProducer packageState tm deps = do
         case lookupTypeEnv typeEnv n of
           Just tt -> case safeTyThingId tt of
             Just var -> (\x -> ([x],mempty)) <$> varToCompl var
-            Nothing -> (\x -> ([x],mempty)) <$> toCompItem curMod curModName n
-          Nothing -> (\x -> ([x],mempty)) <$> toCompItem curMod curModName n
+            Nothing -> (\x -> ([x],mempty)) <$> toCompItem gblEnv curModName n
+          Nothing -> (\x -> ([x],mempty)) <$> toCompItem gblEnv curModName n
       getComplsForOne (GRE n _ False prov) =
         flip foldMapM (map is_decl prov) $ \spec -> do
-          compItem <- toCompItem curMod (is_mod spec) n
+          compItem <- toCompItem gblEnv (is_mod spec) n
           let unqual
                 | is_qual spec = []
                 | otherwise = [compItem]
@@ -272,14 +273,14 @@ cacheDataProducer packageState tm deps = do
         let typ = Just $ varType var
             name = Var.varName var
             label = T.pack $ showGhc name
-        docs <- evalGhcEnv packageState $ getDocumentationTryGhc curMod (tm_parsed_module tm : deps) name
+        docs <- evalGhcEnv packageState $ getDocumentationTryGhc gblEnv (tm_parsed_module tm : deps) name
         return $ CI name (showModName curModName) typ label Nothing docs
 
-      toCompItem :: Module -> ModuleName -> Name -> IO CompItem
-      toCompItem m mn n = do
-        docs <- evalGhcEnv packageState $ getDocumentationTryGhc curMod (tm_parsed_module tm : deps) n
+      toCompItem :: TcGblEnv -> ModuleName -> Name -> IO CompItem
+      toCompItem gbl mn n = do
+        docs <- evalGhcEnv packageState $ getDocumentationTryGhc gblEnv (tm_parsed_module tm : deps) n
         ty <- evalGhcEnv packageState $ catchSrcErrors "completion" $ do
-                name' <- fmap head <$> lookupNames m [n]
+                name' <- fmap head <$> lookupNames gbl [n]
                 return $ name' >>= safeTyThingType
         return $ CI n (showModName mn) (either (const Nothing) id ty) (T.pack $ showGhc n) Nothing docs
 

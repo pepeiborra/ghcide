@@ -22,17 +22,18 @@ import           Development.IDE.GHC.Error
 import           Development.IDE.Spans.Common
 import           FastString
 import SrcLoc
+import TcRnTypes (TcGblEnv)
 
-getDocumentationTryGhc :: GhcMonad m => Module -> [ParsedModule] -> Name -> m SpanDoc
+getDocumentationTryGhc :: GhcMonad m => TcGblEnv -> [ParsedModule] -> Name -> m SpanDoc
 getDocumentationTryGhc mod deps n = head <$> getDocumentationsTryGhc mod deps [n]
 
-getDocumentationsTryGhc :: GhcMonad m => Module -> [ParsedModule] -> [Name] -> m [SpanDoc]
+getDocumentationsTryGhc :: GhcMonad m => TcGblEnv -> [ParsedModule] -> [Name] -> m [SpanDoc]
 
 -- Interfaces are only generated for GHC >= 8.6
 -- In older versions, we cannot retrieve Haddocks using the ghc-api
 #if MIN_GHC_API_VERSION(8,6,0)
-getDocumentationsTryGhc mod sources names = do
-  res <- catchSrcErrors "docs" $ getDocsBatch mod names
+getDocumentationsTryGhc gbl sources names = do
+  res <- catchSrcErrors "docs" $ getDocsBatch gbl names
   case res of
       Left _ -> return $ map (SpanDocText . getDocumentation sources) names
       Right res -> return $ zipWith unwrap res names

@@ -63,7 +63,7 @@ import           HscMain                        (hscInteractive, hscSimplify)
 import           MkIface
 import           NameCache
 import           StringBuffer                   as SB
-import           TcRnMonad (tct_id, TcTyThing(AGlobal, ATcId), initTc, initIfaceLoad, tcg_th_coreplugins)
+import           TcRnMonad (initTcWithGbl, TcGblEnv, tct_id, TcTyThing(AGlobal, ATcId), initIfaceLoad, tcg_th_coreplugins)
 import           TcIface                        (typecheckIface)
 import           TidyPgm
 
@@ -599,11 +599,11 @@ loadInterface session ms sourceMod regen = do
 --   The interactive paths create problems in ghc-lib builds
 --- and leads to fun errors like "Cannot continue after interface file error".
 getDocsBatch :: GhcMonad m
-        => Module  -- ^ a moudle where the names are in scope
+        => TcGblEnv
         -> [Name]
         -> m [Either GetDocsFailure (Maybe HsDocString, Map.Map Int HsDocString)]
-getDocsBatch mod names = withSession $ \hsc_env -> liftIO $ do
-    ((_warns,errs), res) <- initTc hsc_env HsSrcFile False mod fakeSpan $ forM names $ \name ->
+getDocsBatch gbl names = withSession $ \hsc_env -> liftIO $ do
+    ((_warns,errs), res) <- initTcWithGbl hsc_env gbl  fakeSpan $ forM names $ \name ->
         case nameModule_maybe name of
             Nothing -> return (Left $ NameHasNoModule name)
             Just mod -> do
@@ -632,11 +632,11 @@ fakeSpan = realSrcLocSpan $ mkRealSrcLoc (fsLit "<ghcide>") 1 1
 --   The interactive paths create problems in ghc-lib builds
 --- and leads to fun errors like "Cannot continue after interface file error".
 lookupNames :: GhcMonad m
-            => Module -- ^ A module where the Names are in scope
+            => TcGblEnv
             -> [Name]
             -> m (Maybe [TyThing])
-lookupNames mod names = withSession $ \hsc_env -> liftIO $ do
-    ((_warns, _errs), res) <- initTc hsc_env HsSrcFile False mod fakeSpan $ forM names $ \name -> do
+lookupNames gbl names = withSession $ \hsc_env -> liftIO $ do
+    ((_warns, _errs), res) <- initTcWithGbl hsc_env gbl fakeSpan $ forM names $ \name -> do
         tcthing <- tcLookup name
         case tcthing of
             AGlobal thing    -> return thing

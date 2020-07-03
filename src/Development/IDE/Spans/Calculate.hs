@@ -40,6 +40,7 @@ import Development.IDE.Spans.Common
 import Development.IDE.Spans.Documentation
 import Data.List.Extra (nubOrd)
 import qualified Data.Map.Strict as Map
+import TcRnMonad (TcGblEnv)
 
 -- A lot of things gained an extra X argument in GHC 8.6, which we mostly ignore
 -- this U ignores that arg in 8.6, but is hidden in 8.4
@@ -76,6 +77,7 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
          funBinds = funBindMap tm_parsed_module
          thisMod = ms_mod $ pm_mod_summary tm_parsed_module
          modIface = hm_iface tmrModInfo
+         gbl = fst tm_internals_
 
      -- Load this module in HPT to make its interface documentation available
      modifySession (loadModuleHome $ HomeModInfo modIface (snd tm_internals_) Nothing)
@@ -87,7 +89,7 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
 
      -- Batch extraction of kinds
      let typeNames = nubOrd [ n | (Named n, _) <- tts]
-     kinds <- Map.fromList . zip typeNames <$> mapM (lookupKind thisMod) typeNames
+     kinds <- Map.fromList . zip typeNames <$> mapM (lookupKind gbl) typeNames
      let withKind (Named n, x) =
             (Named n, x, join $ Map.lookup n kinds)
          withKind (other, x) =
@@ -103,7 +105,7 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
 
     -- Batch extraction of Haddocks
      let names = nubOrd [ s | (Named s,_,_) <- sortedExprs ++ sortedConstraints]
-     docs <- Map.fromList . zip names <$> getDocumentationsTryGhc thisMod allModules names
+     docs <- Map.fromList . zip names <$> getDocumentationsTryGhc gbl allModules names
      let withDocs (Named n, x, y) = (Named n, x, y, Map.findWithDefault emptySpanDoc n docs)
          withDocs (other, x, y) = (other, x, y, emptySpanDoc)
 
@@ -117,9 +119,9 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
         addEmptyInfo = map (\(a,b) -> (a,b,Nothing))
         constraintToInfo (sp, ty) = (SpanS sp, sp, Just ty)
 
-lookupKind :: GhcMonad m => Module -> Name -> m (Maybe Type)
 lookupKind mod =
     fmap (either (const Nothing) (safeTyThingType =<<)) . catchSrcErrors "span" . (fmap.fmap) head . lookupNames mod . (:[])
+lookupKind :: GhcMonad m => TcGblEnv -> Name -> m (Maybe Type)
 
 -- | The locations in the typechecked module are slightly messed up in some cases (e.g. HsMatchContext always
 -- points to the first match) whereas the parsed module has the correct locations.
