@@ -16,9 +16,12 @@
     │   ├── <experiment>.svg                  - Graph of bytes over elapsed time
     │   ├── <experiment>.diff.svg             - idem, including the previous version
     │   ├── <experiment>.log                  - ghcide-bench output
-    │   ├── ghc.path                          - path to ghc used to build the binary
-    │   ├── ghcide                            - binary for this version
+    │   ├── <experiment>.benchmark-gcStats    - RTS -s output
     │   └── results.csv                       - results of all the experiments for the version
+    ├── binaries
+    │   ├── <commitid>.
+    │       └── ghc.path                      - path to ghc used to build the binary
+    │       └── ghcide                        - binary for this version
     ├── results.csv        - aggregated results of all the experiments and versions
     ├── <experiment>.svg   - graph of bytes over elapsed time, for all the included versions
 
@@ -133,8 +136,8 @@ main = shakeArgs shakeOptions {shakeChange = ChangeModtimeAndDigest} $ do
       Stdout commitid <- command [] "git" ["rev-list", "-n", "1", gitThing]
       writeFileChanged out $ init commitid
 
-  priority 10 $ [build -/- "HEAD/ghcide"
-                , build -/- "HEAD/ghc.path"
+  priority 10 $ [ build -/- "binaries/HEAD/ghcide"
+                , build -/- "binaries/HEAD/ghc.path"
                 ]
     &%> \[out, ghcpath] -> do
       liftIO $ createDirectoryIfMissing True $ dropFileName out
@@ -146,23 +149,24 @@ main = shakeArgs shakeOptions {shakeChange = ChangeModtimeAndDigest} $ do
       Stdout ghcLoc <- cmd (s "stack --stack-yaml=stack88.yaml exec which ghc")
       writeFile' ghcpath ghcLoc
 
-  [ build -/- "*/ghcide",
-    build -/- "*/ghc.path"
+  gitWorktreeResource <- newResource "git-worktree" 1
+
+  [ build -/- "binaries/*/ghcide",
+    build -/- "binaries/*/ghc.path"
     ]
     &%> \[out, ghcpath] -> do
-      let [b, ver, _] = splitDirectories out
+      let [_, _, commitid, _] = splitDirectories out
       liftIO $ createDirectoryIfMissing True $ dropFileName out
-      commitid <- readFile' $ b </> ver </> "commitid"
-      cmd_ $ "git worktree add bench-temp " ++ commitid
-      flip actionFinally (cmd_ (s "git worktree remove bench-temp --force")) $ do
-        Stdout ghcLoc <- cmd [Cwd "bench-temp"] (s "stack --stack-yaml=stack88.yaml exec which ghc")
-        cmd_
-          [Cwd "bench-temp"]
-          ( "stack --local-bin-path=../"
-              <> takeDirectory out
-              <> " --stack-yaml=stack88.yaml build ghcide:ghcide --copy-bins --ghc-options -rtsopts"
-          )
-        writeFile' ghcpath ghcLoc
+      withResource gitWorktreeResource 1 $ do
+        cmd_ $ "git worktree add bench-temp " ++ commitid
+        flip actionFinally (cmd_ (s "git worktree remove bench-temp --force")) $ do
+          cmd_ [Cwd "bench-temp", FileStdout ghcpath] (s "stack --stack-yaml=stack88.yaml exec which ghc")
+          cmd_
+            [Cwd "bench-temp"]
+            ( "stack --local-bin-path=../"
+                <> takeDirectory out
+                <> " --stack-yaml=stack88.yaml build ghcide:ghcide --copy-bins --ghc-options -rtsopts"
+            )
 
   priority 8000 $
     build -/- "*/results.csv" %> \out -> do
@@ -183,11 +187,12 @@ main = shakeArgs shakeOptions {shakeChange = ChangeModtimeAndDigest} $ do
       build -/- "*/*.log"
     ]
       &%> \[outcsv, _outGc, outLog] -> do
-        let [_, _, exp] = splitDirectories outcsv
+        let [b, _, exp] = splitDirectories outcsv
         samples <- readSamples
         liftIO $ createDirectoryIfMissing True $ dropFileName outcsv
-        let ghcide = dropFileName outcsv </> "ghcide"
-            ghcpath = dropFileName outcsv </> "ghc.path"
+        commitid <- readFile' (dropFileName outcsv </> "commitid")
+        let ghcide = b </> "binaries" </> commitid </> "ghcide"
+            ghcpath = b </> "binaries" </> commitid </> "ghc.path"
         need [ghcide, ghcpath]
         ghcPath <- readFile' ghcpath
         withResource ghcideBenchResource 1 $ do
