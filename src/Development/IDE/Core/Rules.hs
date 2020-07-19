@@ -86,6 +86,7 @@ import Control.Exception
 import Control.Monad.State
 import FastString (FastString(uniq))
 import qualified HeaderInfo as Hdr
+import qualified Data.Serialize as Cereal
 
 -- | This is useful for rules to convert rules that can only produce errors or
 -- a result into the more general IdeResult type that supports producing
@@ -463,8 +464,8 @@ getDependenciesRule =
         let allFiles = reachableModules depInfo
         _ <- uses_ ReportImportCycles allFiles
         opts <- getIdeOptions
-        let mbFingerprints = map (fingerprintString . fromNormalizedFilePath) allFiles <$ optShakeFiles opts
-        return (fingerprintToBS . fingerprintFingerprints <$> mbFingerprints, ([], transitiveDeps depInfo file))
+        let mbFingerprints = hash allFiles <$ optShakeFiles opts
+        return (Cereal.encode <$> mbFingerprints, ([], transitiveDeps depInfo file))
 
 -- Source SpanInfo is used by AtPoint and Goto Definition.
 getSpanInfoRule :: Rules ()
@@ -579,7 +580,7 @@ loadGhcSession = do
         res <- optGhcSession opts
 
         let fingerprint = hash (sessionVersion res)
-        return (BS.pack (show fingerprint), res)
+        return (Cereal.encode fingerprint, res)
 
     defineEarlyCutoff $ \GhcSession file -> do
         IdeGhcSession{loadSessionFun} <- useNoFile_ GhcSessionIO
@@ -600,7 +601,7 @@ loadGhcSession = do
                 Just {} -> ""
                 -- Hash the HscEnvEq returned so cutoff if it didn't change
                 -- from last time
-                Nothing -> BS.pack (show (hash (snd val)))
+                Nothing -> Cereal.encode (hash $ snd val)
         return (Just cutoffHash, val)
 
     define $ \GhcSessionDeps file -> ghcSessionDepsDefinition file
@@ -703,7 +704,7 @@ getModSummaryRule = defineEarlyCutoff $ \GetModSummary f -> do
                 fingerPrintImports = map (fmap uniq *** (moduleNameString . unLoc))
                 opts = Hdr.getOptions dflags (fromJust ms_hspp_buf) (fromNormalizedFilePath f)
                 fp = hash fingerPrint
-            in BS.pack (show fp)
+            in Cereal.encode fp
 
 getModIfaceRule :: Rules ()
 getModIfaceRule = defineEarlyCutoff $ \GetModIface f -> do

@@ -31,6 +31,7 @@ import Development.IDE.Types.Logger
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Shake
 import Control.Monad
+import qualified Data.Serialize as Cereal
 
 newtype OfInterestVar = OfInterestVar (Var (Hashed (HashSet NormalizedFilePath)))
 instance IsIdeGlobal OfInterestVar
@@ -51,7 +52,7 @@ ofInterestRules = do
     defineEarlyCutoff $ \GetFilesOfInterest _file -> assert (null $ fromNormalizedFilePath _file) $ do
         alwaysRerun
         filesOfInterest <- getFilesOfInterestUntracked
-        pure (Just $ BS.fromString $ show $ hash filesOfInterest, ([], Just $ unhashed filesOfInterest))
+        pure (Just $ Cereal.encode $ hash filesOfInterest, ([], Just $ unhashed filesOfInterest))
 
 
 -- | Get the files that are open in the IDE.

@@ -28,7 +28,6 @@ import           Control.Exception
 import           GHC.Generics
 import Data.Either.Extra
 import System.IO.Error
-import qualified Data.ByteString.Char8 as BS
 import Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
 import Development.IDE.Core.OfInterest (kick)
@@ -51,6 +50,7 @@ import qualified Development.IDE.Types.Logger as L
 
 import Language.Haskell.LSP.Core
 import Language.Haskell.LSP.VFS
+import Data.Serialize (encode)
 
 -- | haskell-lsp manages the VFS internally and automatically so we cannot use
 -- the builtin VFS without spawning up an LSP server. To be able to test things
@@ -100,12 +100,12 @@ getModificationTimeRule :: VFSHandle -> Rules ()
 getModificationTimeRule vfs =
     defineEarlyCutoff $ \(GetModificationTime_ missingFileDiags) file -> do
         let file' = fromNormalizedFilePath file
-        let wrap time@(l,s) = (Just $ BS.pack $ show time, ([], Just $ ModificationTime l s))
+        let wrap time@(l,s) = (Just $ encode time, ([], Just $ ModificationTime l s))
         alwaysRerun
         mbVirtual <- liftIO $ getVirtualFile vfs $ filePathToUri' file
         case mbVirtual of
             Just (virtualFileVersion -> ver) ->
-                pure (Just $ BS.pack $ show ver, ([], Just $ VFSVersion ver))
+                pure (Just $ encode ver, ([], Just $ VFSVersion ver))
             Nothing -> liftIO $ fmap wrap (getModTime file')
               `catch` \(e :: IOException) -> do
                 let err | isDoesNotExistError e = "File does not exist: " ++ file'
