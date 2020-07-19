@@ -32,7 +32,7 @@ import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Shake
 import Control.Monad
 
-newtype OfInterestVar = OfInterestVar (Var (HashSet NormalizedFilePath))
+newtype OfInterestVar = OfInterestVar (Var (Hashed (HashSet NormalizedFilePath)))
 instance IsIdeGlobal OfInterestVar
 
 type instance RuleResult GetFilesOfInterest = HashSet NormalizedFilePath
@@ -47,11 +47,11 @@ instance Binary   GetFilesOfInterest
 -- | The rule that initialises the files of interest state.
 ofInterestRules :: Rules ()
 ofInterestRules = do
-    addIdeGlobal . OfInterestVar =<< liftIO (newVar HashSet.empty)
+    addIdeGlobal . OfInterestVar =<< liftIO (newVar $ hashed HashSet.empty)
     defineEarlyCutoff $ \GetFilesOfInterest _file -> assert (null $ fromNormalizedFilePath _file) $ do
         alwaysRerun
         filesOfInterest <- getFilesOfInterestUntracked
-        pure (Just $ BS.fromString $ show filesOfInterest, ([], Just filesOfInterest))
+        pure (Just $ BS.fromString $ show $ hash filesOfInterest, ([], Just $ unhashed filesOfInterest))
 
 
 -- | Get the files that are open in the IDE.
@@ -68,7 +68,7 @@ getFilesOfInterest = useNoFile_ GetFilesOfInterest
 setFilesOfInterest :: IdeState -> HashSet NormalizedFilePath -> IO ()
 setFilesOfInterest state files = modifyFilesOfInterest state (const files)
 
-getFilesOfInterestUntracked :: Action (HashSet NormalizedFilePath)
+getFilesOfInterestUntracked :: Action (Hashed (HashSet NormalizedFilePath))
 getFilesOfInterestUntracked = do
     OfInterestVar var <- getIdeGlobalAction
     liftIO $ readVar var
@@ -78,7 +78,7 @@ getFilesOfInterestUntracked = do
 modifyFilesOfInterest :: IdeState -> (HashSet NormalizedFilePath -> HashSet NormalizedFilePath) -> IO ()
 modifyFilesOfInterest state f = do
     OfInterestVar var <- getIdeGlobalState state
-    files <- modifyVar var $ pure . dupe . f
+    files <- fmap unhashed $ modifyVar var $ pure . dupe . mapHashed f
     logDebug (ideLogger state) $ "Set files of interest to: " <> T.pack (show $ HashSet.toList files)
     let das = map (\nfp -> mkDelayedAction "OfInterest" Debug (use GetSpanInfo nfp)) (HashSet.toList files)
     shakeRestart state das
