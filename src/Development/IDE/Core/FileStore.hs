@@ -11,6 +11,7 @@ module Development.IDE.Core.FileStore(
     setSomethingModified,
     fileStoreRules,
     modificationTime,
+    newerFileVersion,
     VFSHandle,
     makeVFSHandle,
     makeLSPVFSHandle
@@ -159,6 +160,13 @@ modificationTime (ModificationTime large small) =
 #else
     Just (systemToUTCTime $ MkSystemTime large (fromIntegral small))
 #endif
+
+
+-- | A comparision function where any VFS version is newer than an ondisk version
+newerFileVersion :: FileVersion -> FileVersion -> Bool
+newerFileVersion (VFSVersion i) (VFSVersion j) = i > j
+newerFileVersion (VFSVersion {}) (ModificationTime {}) = True
+newerFileVersion m1 m2 = modificationTime m1 > modificationTime m2
 
 getFileContentsRule :: VFSHandle -> Rules ()
 getFileContentsRule vfs =

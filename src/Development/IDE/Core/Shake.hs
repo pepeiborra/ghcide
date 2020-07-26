@@ -49,7 +49,7 @@ module Development.IDE.Core.Shake(
     sendEvent,
     ideLogger,
     actionLogger,
-    FileVersion(..), newerFileVersion,
+    FileVersion(..),
     Priority(..),
     updatePositionMapping,
     deleteValue,
@@ -1116,11 +1116,6 @@ vfsVersion :: FileVersion -> Maybe Int
 vfsVersion (VFSVersion i) = Just i
 vfsVersion ModificationTime{} = Nothing
 
--- | A comparision function where any VFS version is newer than an ondisk version
-newerFileVersion :: FileVersion -> FileVersion -> Bool
-newerFileVersion (VFSVersion i) (VFSVersion j) = i > j
-newerFileVersion (VFSVersion {}) (ModificationTime {}) = True
-newerFileVersion m1 m2 = modificationTime m1 > modificationTime m2
 
 getDiagnosticsFromStore :: StoreItem -> [Diagnostic]
 getDiagnosticsFromStore (StoreItem _ diags) = concatMap SL.fromSortedList $ Map.elems diags
