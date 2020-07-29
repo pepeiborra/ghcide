@@ -30,6 +30,7 @@ import Data.Time.Clock (UTCTime)
 import Data.Version
 import Development.IDE.Core.Debouncer
 import Development.IDE.Core.FileStore
+import Development.IDE.Core.IdeConfiguration
 import Development.IDE.Core.OfInterest
 import Development.IDE.Core.Service
 import Development.IDE.Core.Rules
@@ -108,7 +109,6 @@ main = do
 
     whenJust argsCwd IO.setCurrentDirectory
 
-    dir <- IO.getCurrentDirectory
     command <- makeLspCommandId "typesignature.add"
 
     let plugins = Completions.plugin <> CodeAction.plugin
@@ -125,7 +125,7 @@ main = do
         runLanguageServer options (pluginHandler plugins) onInitialConfiguration onConfigurationChange $ \getLspId event vfs caps wProg wIndefProg -> do
             t <- t
             hPutStrLn stderr $ "Started LSP server in " ++ showDuration t
-            sessionLoader <- loadSession dir
+            sessionLoader <- loadSession
             let options = (defaultIdeOptions sessionLoader)
                     { optReportProgress = clientSupportsProgress caps
                     , optShakeProfiling = argsShakeProfiling
@@ -140,6 +140,8 @@ main = do
         -- GHC produces messages with UTF8 in them, so make sure the terminal doesn't error
         hSetEncoding stdout utf8
         hSetEncoding stderr utf8
+
+        dir <- IO.getCurrentDirectory
 
         putStrLn $ "Ghcide setup tester in " ++ dir ++ "."
         putStrLn "Report bugs at https://github.com/digital-asset/ghcide/issues"
@@ -159,7 +161,7 @@ main = do
         vfs <- makeVFSHandle
         debouncer <- newAsyncDebouncer
         let dummyWithProg _ _ f = f (const (pure ()))
-        sessionLoader <- loadSession dir
+        sessionLoader <- loadSession
         ide <- initialise def mainRule (pure $ IdInt 0) (showEvent lock) dummyWithProg (const (const id)) (logger minBound) debouncer (defaultIdeOptions sessionLoader)  vfs
 
         putStrLn "\nStep 4/4: Type checking the files"
@@ -245,14 +247,15 @@ setNameCache nc hsc = hsc { hsc_NC = nc }
 -- | This is the key function which implements multi-component support. All
 -- components mapping to the same hie.yaml file are mapped to the same
 -- HscEnv which is updated as new components are discovered.
-loadSession :: FilePath -> IO (Action IdeGhcSession)
-loadSession dir = do
+loadSession :: IO (Action IdeGhcSession)
+loadSession = do
   -- Mapping from hie.yaml file to HscEnv, one per hie.yaml file
   hscEnvs <- newVar Map.empty :: IO (Var HieMap)
   -- Mapping from a Filepath to HscEnv
   fileToFlags <- newVar Map.empty :: IO (Var FlagsMap)
   -- Version of the mappings above
   version <- newVar 0
+
   let returnWithVersion fun = IdeGhcSession fun <$> liftIO (readVar version)
   let invalidateShakeCache = do
         modifyVar_ version (return . succ)
@@ -268,9 +271,14 @@ loadSession dir = do
   dummyAs <- async $ return (error "Uninitialised")
   runningCradle <- newVar dummyAs :: IO (Var (Async (IdeResult HscEnvEq,[FilePath])))
 
+  dir <- IO.getCurrentDirectory
+
   return $ do
     ShakeExtras{logger, eventer, restartShakeSession, withIndefiniteProgress, ideNc} <- getShakeExtras
     IdeOptions{optTesting = IdeTesting optTesting} <- getIdeOptions
+    IdeConfiguration{workspaceRoot} <- getIdeConfiguration
+
+    let workspaceDir = fromMaybe dir (workspaceRoot >>= uriToFilePath)
 
     -- Create a new HscEnv from a hieYaml root and a set of options
     -- If the hieYaml file already has an HscEnv, the new component is
@@ -374,7 +382,7 @@ loadSession dir = do
            when optTesting $ eventer $ notifyCradleLoaded cfp
            logInfo logger $ T.pack ("Consulting the cradle for " <> show cfp)
 
-           cradle <- maybe (loadImplicitCradle $ addTrailingPathSeparator dir) loadCradle hieYaml
+           cradle <- maybe (loadImplicitCradle $ addTrailingPathSeparator workspaceDir) loadCradle hieYaml
            -- Display a user friendly progress message here: They probably don't know what a
            -- cradle is
            let progMsg = "Setting up project " <> T.pack (takeBaseName (cradleRootDir cradle))

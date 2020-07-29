@@ -6,6 +6,8 @@ module Development.IDE.Core.IdeConfiguration
   , parseWorkspaceFolder
   , isWorkspaceFile
   , modifyWorkspaceFolders
+  , getIdeConfiguration
+  , getWorkspaceRoot
   )
 where
 
@@ -22,6 +24,7 @@ import           System.FilePath (isRelative)
 -- | Lsp client relevant configuration details
 data IdeConfiguration = IdeConfiguration
   { workspaceFolders :: HashSet NormalizedUri
+  , workspaceRoot :: Maybe Uri
   }
   deriving (Show)
 
@@ -41,6 +44,7 @@ parseConfiguration :: InitializeParams -> IdeConfiguration
 parseConfiguration InitializeParams {..} =
   IdeConfiguration { .. }
  where
+  workspaceRoot = _rootUri
   workspaceFolders =
     foldMap (singleton . toNormalizedUri) _rootUri
       <> (foldMap . foldMap)
@@ -55,8 +59,7 @@ modifyWorkspaceFolders
   :: IdeState -> (HashSet NormalizedUri -> HashSet NormalizedUri) -> IO ()
 modifyWorkspaceFolders ide f = do
   IdeConfigurationVar var <- getIdeGlobalState ide
-  IdeConfiguration    ws  <- readVar var
-  writeVar var (IdeConfiguration (f ws))
+  modifyVar_ var $ \ideConf -> return ideConf{workspaceFolders = f (workspaceFolders ideConf)}
 
 isWorkspaceFile :: NormalizedFilePath -> Action Bool
 isWorkspaceFile file =
@@ -69,3 +72,6 @@ isWorkspaceFile file =
         any
           (\root -> toText root `isPrefixOf` toText (filePathToUri' file))
           workspaceFolders
+
+getWorkspaceRoot :: Action (Maybe Uri)
+getWorkspaceRoot = workspaceRoot <$> getIdeConfiguration
