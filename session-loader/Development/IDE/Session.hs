@@ -66,6 +66,8 @@ import Module
 import NameCache
 import Packages
 import Control.Exception (evaluate)
+import Data.List.Extra (splitOn)
+import FastString (unpackFS, mkFastString)
 
 -- | Given a root directory, return a Shake 'Action' which setups an
 -- 'IdeGhcSession' given a file.
@@ -158,7 +160,7 @@ loadSession dir = do
                   -- Get all the unit-ids for things in this component
                   inplace = map rawComponentUnitId new_deps
 
-              new_deps' <- forM new_deps $ \RawComponentInfo{..} -> do
+              new_deps' <- forM new_deps $ \raw@RawComponentInfo{..} -> do
                   -- Remove all inplace dependencies from package flags for
                   -- components in this HscEnv
                   let (df2, uids) = removeInplacePackages inplace rawComponentDynFlags
@@ -168,13 +170,8 @@ loadSession dir = do
                   -- The final component information, mostly the same but the DynFlags don't
                   -- contain any packages which are also loaded
                   -- into the same component.
-                  pure $ ComponentInfo rawComponentUnitId
-                                       processed_df
-                                       uids
-                                       rawComponentTargets
-                                       rawComponentFP
-                                       rawComponentCOptions
-                                       rawComponentDependencyInfo
+                  pure $ (fromRawComponentInfo raw uids){componentDynFlags = processed_df}
+
               -- Make a new HscEnv, we have to recompile everything from
               -- scratch again (for now)
               -- It's important to keep the same NameCache though for reasons
@@ -413,7 +410,7 @@ newComponentCache
          -> Maybe FilePath -- Path to cradle
          -> NormalizedFilePath -- Path to file that caused the creation of this component
          -> HscEnv
-         -> [(InstalledUnitId, DynFlags)]
+         -> [([InstalledUnitId], DynFlags)]
          -> ComponentInfo
          -> IO ( [TargetDetails], (IdeResult HscEnvEq, DependencyInfo))
 newComponentCache logger exts cradlePath cfp hsc_env uids ci = do
@@ -529,9 +526,16 @@ data RawComponentInfo = RawComponentInfo
   , rawComponentDependencyInfo :: DependencyInfo
   }
 
--- This is processed information about the component, in particular the dynflags will be modified.
+
+-- This is processed information about the component,
+-- in particular the dynflags will be modified,
+-- and the component unit id is parsed
 data ComponentInfo = ComponentInfo
-  { componentUnitId :: InstalledUnitId
+  {
+  -- | Unit ids provided by this component.
+  --   A component that provides multiple units should list them
+  --   separated by commas.
+    componentUnitId :: [InstalledUnitId]
   -- | Processed DynFlags. Does not contain inplace packages such as local
   -- libraries. Can be used to actually load this Component.
   , componentDynFlags :: DynFlags
@@ -549,6 +553,21 @@ data ComponentInfo = ComponentInfo
   -- to last modification time. See Note [Multi Cradle Dependency Info]
   , componentDependencyInfo :: DependencyInfo
   }
+
+fromRawComponentInfo :: RawComponentInfo -> [InstalledUnitId] -> ComponentInfo
+fromRawComponentInfo RawComponentInfo{..} internalUnits =
+    ComponentInfo
+        ( map (InstalledUnitId . mkFastString)
+        $ splitOn ","
+        $ unpackFS
+        $ installedUnitIdFS rawComponentUnitId
+        )
+        rawComponentDynFlags
+        internalUnits
+        rawComponentTargets
+        rawComponentFP
+        rawComponentCOptions
+        rawComponentDependencyInfo
 
 -- | Check if any dependency has been modified lately.
 checkDependencyInfo :: DependencyInfo -> IO Bool
@@ -658,7 +677,7 @@ setHiDir f d =
     d { hiDir      = Just f}
 
 getCacheDir :: String -> [String] -> IO FilePath
-getCacheDir prefix opts = getXdgDirectory XdgCache (cacheDir </> prefix ++ "-" ++ opts_hash)
+getCacheDir prefix opts = getXdgDirectory XdgCache (cacheDir </> take 20 prefix ++ "-" ++ opts_hash)
     where
         -- Create a unique folder per set of different GHC options, assuming that each different set of
         -- GHC options will create incompatible interface files.

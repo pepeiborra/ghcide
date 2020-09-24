@@ -31,7 +31,6 @@ import           Control.Monad.Extra
 import           Control.Monad.IO.Class
 import           System.FilePath
 import DriverPhases
-import Data.Maybe
 
 data Import
   = FileImport !ArtifactsLocation
@@ -84,15 +83,16 @@ locateModuleFile import_dirss exts doesExist isSource modName = do
 -- It only returns Just for unit-ids which are possible to import into the
 -- current module. In particular, it will return Nothing for 'main' components
 -- as they can never be imported into another package.
-mkImportDirs :: DynFlags -> (M.InstalledUnitId, DynFlags) -> Maybe (PackageName, [FilePath])
-mkImportDirs df (i, DynFlags{importPaths}) = (, importPaths) <$> getPackageName df i
+-- If multiple packages are given, then all of them must be importable.
+mkImportDirs :: DynFlags -> ([M.InstalledUnitId], DynFlags) -> Maybe ([PackageName], [FilePath])
+mkImportDirs df (i, DynFlags{importPaths}) = (, importPaths) <$> mapM (getPackageName df) i
 
 -- | locate a module in either the file system or the package database. Where we go from *daml to
 -- Haskell
 locateModule
     :: MonadIO m
     => DynFlags
-    -> [(M.InstalledUnitId, DynFlags)] -- ^ Import directories
+    -> [([M.InstalledUnitId], DynFlags)] -- ^ Import directories
     -> [String]                        -- ^ File extensions
     -> (ModuleName -> NormalizedFilePath -> m Bool)  -- ^ does file exist predicate
     -> Located ModuleName              -- ^ Moudle name
@@ -120,7 +120,7 @@ locateModule dflags comp_info exts doesExist modName mbPkgName isSource = do
         Nothing -> lookupInPackageDB dflags
         Just file -> toModLocation file
   where
-    import_paths = mapMaybe (mkImportDirs dflags) comp_info
+    import_paths = [ (p,ii) | x <- comp_info, Just (pp,ii) <- [mkImportDirs dflags x], p <- pp]
     toModLocation file = liftIO $ do
         loc <- mkHomeModLocation dflags (unLoc modName) (fromNormalizedFilePath file)
         return $ Right $ FileImport $ ArtifactsLocation file loc (not isSource)
