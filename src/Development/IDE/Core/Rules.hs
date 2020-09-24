@@ -270,7 +270,7 @@ getParsedModuleRule = defineEarlyCutoff $ \GetParsedModule file -> do
     let hsc = hscEnv sess
         -- These packages are used when removing PackageImports from a
         -- parsed module
-        comp_pkgs = mapMaybe (fmap fst . mkImportDirs (hsc_dflags hsc)) (deps sess)
+        comp_pkgs = getComponentPackages sess
     opt <- getIdeOptions
     (modTime, contents) <- getFileContents file
 
@@ -811,7 +811,7 @@ regenerateHiFile sess f objNeeded = do
     let hsc = hscEnv sess
         -- After parsing the module remove all package imports referring to
         -- these packages as we have already dealt with what they map to.
-        comp_pkgs = mapMaybe (fmap fst . mkImportDirs (hsc_dflags hsc)) (deps sess)
+        comp_pkgs = getComponentPackages sess
     opt <- getIdeOptions
     (modTime, contents) <- getFileContents f
 

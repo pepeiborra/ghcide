@@ -32,7 +32,9 @@ module Development.IDE.GHC.Util(
     dontWriteHieFiles,
     disableWarningsAsErrors,
     newHscEnvEqPreserveImportPaths,
-    newHscEnvEqWithImportPaths) where
+    newHscEnvEqWithImportPaths,
+    getComponentPackages
+    ) where
 
 import Control.Concurrent
 import Data.List.Extra
@@ -77,6 +79,7 @@ import RdrName (nameRdrName, rdrNameOcc)
 import Development.IDE.GHC.Compat as GHC
 import Development.IDE.Types.Location
 import System.Directory (canonicalizePath)
+import GhcPlugins (PackageName)
 
 
 ----------------------------------------------------------------------
@@ -177,7 +180,7 @@ moduleImportPath (takeDirectory . fromNormalizedFilePath -> pathDir) mn
 data HscEnvEq = HscEnvEq
     { envUnique :: !Unique
     , hscEnv :: !HscEnv
-    , deps   :: [(InstalledUnitId, DynFlags)]
+    , deps   :: [([InstalledUnitId], DynFlags)]
                -- ^ In memory components for this HscEnv
                -- This is only used at the moment for the import dirs in
                -- the DynFlags
@@ -187,7 +190,7 @@ data HscEnvEq = HscEnvEq
     }
 
 -- | Wrap an 'HscEnv' into an 'HscEnvEq'.
-newHscEnvEq :: FilePath -> HscEnv -> [(InstalledUnitId, DynFlags)] -> IO HscEnvEq
+newHscEnvEq :: FilePath -> HscEnv -> [([InstalledUnitId], DynFlags)] -> IO HscEnvEq
 newHscEnvEq cradlePath hscEnv0 deps = do
     envUnique <- newUnique
     let relativeToCradle = (takeDirectory cradlePath </>)
@@ -200,14 +203,14 @@ newHscEnvEq cradlePath hscEnv0 deps = do
 
     return HscEnvEq{..}
 
-newHscEnvEqWithImportPaths :: Maybe [String] -> HscEnv -> [(InstalledUnitId, DynFlags)] -> IO HscEnvEq
+newHscEnvEqWithImportPaths :: Maybe [String] -> HscEnv -> [([InstalledUnitId], DynFlags)] -> IO HscEnvEq
 newHscEnvEqWithImportPaths envImportPaths hscEnv deps = do
     envUnique <- newUnique
     return HscEnvEq{..}
 
 -- | Wrap an 'HscEnv' into an 'HscEnvEq'.
 newHscEnvEqPreserveImportPaths
-    :: HscEnv -> [(InstalledUnitId, DynFlags)] -> IO HscEnvEq
+    :: HscEnv -> [([InstalledUnitId], DynFlags)] -> IO HscEnvEq
 newHscEnvEqPreserveImportPaths hscEnv deps = do
     let envImportPaths = Nothing
     envUnique <- newUnique
@@ -224,6 +227,10 @@ hscEnvWithImportPaths HscEnvEq{..}
 
 removeImportPaths :: HscEnv -> HscEnv
 removeImportPaths hsc = hsc{hsc_dflags = (hsc_dflags hsc){importPaths = []}}
+
+getComponentPackages :: HscEnvEq -> [PackageName]
+getComponentPackages HscEnvEq{..} =
+    catMaybes $ concatMap (map (getPackageName (hsc_dflags hscEnv)) . fst) deps
 
 instance Show HscEnvEq where
   show HscEnvEq{envUnique} = "HscEnvEq " ++ show (hashUnique envUnique)
