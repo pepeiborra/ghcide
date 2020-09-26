@@ -57,12 +57,8 @@ modifyFileExists state changes = do
   FileExistsMapVar var <- getIdeGlobalState state
   changesMap           <- evaluate $ HashMap.fromList changes
 
-  -- Masked to ensure that the previous values are flushed together with the map update
-  mask $ \_ -> do
-    -- update the map
-    modifyVar_ var $ evaluate . HashMap.union changesMap
-    -- flush previous values
-    mapM_ (deleteValue state GetFileExists . fst) changes
+  -- update the map
+  modifyVar_ var $ evaluate . HashMap.union changesMap
 
 -------------------------------------------------------------------------------------
 
@@ -117,6 +113,7 @@ fileExistsRulesFast getLspId vfs =
 
 fileExistsFast :: IO LspId -> VFSHandle -> NormalizedFilePath -> Action (Maybe BS.ByteString, ([a], Maybe Bool))
 fileExistsFast getLspId vfs file = do
+    alwaysRerun
     fileExistsMap <- getFileExistsMapUntracked
     let mbFilesWatched = HashMap.lookup file fileExistsMap
     case mbFilesWatched of
