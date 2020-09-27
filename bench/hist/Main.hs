@@ -49,6 +49,7 @@ import qualified Data.Text as T
 import Data.Yaml ((.!=), (.:?), FromJSON (..), ToJSON (..), Value (..), decodeFileThrow)
 import Development.Shake
 import Development.Shake.Classes (Binary, Hashable, NFData)
+import Experiments.Types (exampleToOptions, Example(..))
 import GHC.Exts (IsList (..))
 import GHC.Generics (Generic)
 import qualified Graphics.Rendering.Chart.Backend.Diagrams as E
@@ -197,12 +198,12 @@ main = shakeArgs shakeOptions {shakeChange = ChangeModtimeAndDigest} $ do
                 "-v",
                 "--samples=" <> show samples,
                 "--csv=" <> outcsv,
-                "--example-package-version=3.0.0.0",
                 "--ghcide-options= +RTS -I0.5 -RTS",
                 "--ghcide=" <> ghcide,
                 "--select",
                 unescaped (unescapeExperiment (Escaped $ dropExtension exp))
               ] ++
+              exampleToOptions (example configStatic) ++
               [ "--stack" | Stack == buildSystem]
           cmd_ Shell $ "mv *.benchmark-gcStats " <> dropFileName outcsv
 
@@ -281,6 +282,7 @@ findGhc Stack = do
 
 data Config = Config
   { experiments :: [Unescaped String],
+    example :: Example,
     samples :: Natural,
     versions :: [GitCommit],
     -- | Path to the ghcide-bench binary for the experiments

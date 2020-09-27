@@ -10,6 +10,13 @@ ghcideBench: ghcide-bench
 # Output folder for the experiments
 outputFolder: bench-hist
 
+# Example project used to run the experiments
+example:
+    tag: GetPackage
+    exampleName: Cabal
+    exampleVersion: 3.0.0.0
+    exampleModule: Distribution/Simple.hs
+
 # The set of experiments to execute
 experiments:
     - hover
