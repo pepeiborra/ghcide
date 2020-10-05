@@ -13,11 +13,15 @@ outputFolder: bench-results
 # Example project used to run the experiments
 # Can either be a Hackage package (name,version)
 # or a local project (path) with a valid `hie.yaml` file
-example:
-    name: Cabal
+examples:
+  - name: Cabal
     version: 3.0.0.0
-    # path: path/to/example
     module: Distribution/Simple.hs
+  - name: haskell-lsp-types
+    version: 0.22.0.0
+    module: src/Language/Haskell/LSP/Types/Lens.hs
+# - path: path-to-example
+#   module: path-to-module
 
 # The set of experiments to execute
 experiments:
