@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP          #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {-|
@@ -613,7 +614,11 @@ removeInplacePackages us df = (df { packageFlags = ps
   where
     (uids, ps) = partitionEithers (map go (packageFlags df))
     fake_uid = toInstalledUnitId (stringToUnitId "fake_uid")
+#ifdef __FACEBOOK_HASKELL__
+    go p@(ExposePackage _ (UnitIdArg u) _ _) = if toInstalledUnitId u `elem` us
+#else
     go p@(ExposePackage _ (UnitIdArg u) _) = if toInstalledUnitId u `elem` us
+#endif
                                                   then Left (toInstalledUnitId u)
                                                   else Right p
     go p = Right p
