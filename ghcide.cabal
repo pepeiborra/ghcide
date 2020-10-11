@@ -205,6 +205,7 @@ library
     ghc-options: -Wall -Wno-name-shadowing -Wincomplete-uni-patterns
 
 executable ghcide-test-preprocessor
+    buildable: False
     default-language: Haskell2010
     hs-source-dirs: test/preprocessor
     ghc-options: -Wall -Wno-name-shadowing
@@ -383,6 +384,7 @@ test-suite ghcide-tests
         ViewPatterns
 
 executable ghcide-bench
+    buildable: False
     default-language: Haskell2010
     build-tool-depends:
         ghcide:ghcide
