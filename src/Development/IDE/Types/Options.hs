@@ -123,7 +123,7 @@ data LspConfig
     deriving anyclass (FromJSON, ToJSON)
 
 defaultLspConfig :: LspConfig
-defaultLspConfig = LspConfig NeverCheck (CheckProject False)
+defaultLspConfig = LspConfig CheckOnSaveAndClose (CheckProject True)
 
 data IdePreprocessedSource = IdePreprocessedSource
   { preprocWarnings :: [(GHC.SrcSpan, String)]
