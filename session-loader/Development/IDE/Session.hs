@@ -70,6 +70,8 @@ import NameCache
 import Packages
 import Control.Exception (evaluate)
 import Data.Void
+import FastString (unpackFS, mkFastString)
+import Data.List.Extra (splitOn)
 
 data SessionLoadingOptions = SessionLoadingOptions
   { findCradle :: FilePath -> IO (Maybe FilePath)
