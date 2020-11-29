@@ -10,7 +10,6 @@ module Development.IDE.GHC.Util(
     envImportPaths,
     modifyDynFlags,
     evalGhcEnv,
-    runGhcEnv,
     deps,
     -- * GHC wrappers
     prettyPrint,
@@ -71,7 +70,6 @@ import Outputable (showSDocUnsafe, ppr, showSDoc, Outputable)
 import Packages (getPackageConfigMap, lookupPackage')
 import SrcLoc (mkRealSrcLoc)
 import FastString (mkFastString)
-import DynFlags (emptyFilesToClean, unsafeGlobalDynFlags)
 import Module (moduleNameSlashes, InstalledUnitId)
 import OccName (parenSymOcc)
 import RdrName (nameRdrName, rdrNameOcc)

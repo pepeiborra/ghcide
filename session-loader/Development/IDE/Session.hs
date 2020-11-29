@@ -3,7 +3,12 @@
 {-|
 The logic for setting up a ghcide session by tapping into hie-bios.
 -}
-module Development.IDE.Session (loadSession) where
+module Development.IDE.Session
+  (SessionLoadingOptions(..)
+  ,defaultLoadingOptions
+  ,loadSession
+  ,loadSessionWithOptions
+  ) where
 
 -- Unfortunately, we cannot use loadSession with ghc-lib since hie-bios uses
 -- the real GHC library and the types are incompatible. Furthermore, when
@@ -31,7 +36,6 @@ import Data.IORef
 import Data.Maybe
 import Data.Time.Clock
 import Data.Version
-import Development.IDE.Core.OfInterest
 import Development.IDE.Core.Shake
 import Development.IDE.Core.RuleTypes
 import Development.IDE.GHC.Compat hiding (Target, TargetModule, TargetFile)
@@ -45,7 +49,7 @@ import Development.IDE.Types.Logger
 import Development.IDE.Types.Options
 import Development.Shake (Action)
 import GHC.Check
-import HIE.Bios
+import qualified HIE.Bios as HieBios
 import HIE.Bios.Environment hiding (getCacheDir)
 import HIE.Bios.Types
 import Hie.Implicit.Cradle (loadImplicitHieCradle)
@@ -59,15 +63,24 @@ import System.Info
 import System.IO
 
 import GHCi
-import DynFlags
 import HscTypes (ic_dflags, hsc_IC, hsc_dflags, hsc_NC)
 import Linker
 import Module
 import NameCache
 import Packages
 import Control.Exception (evaluate)
-import Data.List.Extra (splitOn)
-import FastString (unpackFS, mkFastString)
+import Data.Void
+
+data SessionLoadingOptions = SessionLoadingOptions
+  { findCradle :: FilePath -> IO (Maybe FilePath)
+  , loadCradle :: FilePath -> IO (HieBios.Cradle Void)
+  }
+
+defaultLoadingOptions :: SessionLoadingOptions
+defaultLoadingOptions = SessionLoadingOptions
+    {findCradle = HieBios.findCradle
+    ,loadCradle = HieBios.loadCradle
+    }
 
 -- | Given a root directory, return a Shake 'Action' which setups an
 -- 'IdeGhcSession' given a file.
@@ -83,7 +96,10 @@ import FastString (unpackFS, mkFastString)
 -- components mapping to the same hie.yaml file are mapped to the same
 -- HscEnv which is updated as new components are discovered.
 loadSession :: FilePath -> IO (Action IdeGhcSession)
-loadSession dir = do
+loadSession = loadSessionWithOptions defaultLoadingOptions
+
+loadSessionWithOptions :: SessionLoadingOptions -> FilePath -> IO (Action IdeGhcSession)
+loadSessionWithOptions SessionLoadingOptions{..} dir = do
   -- Mapping from hie.yaml file to HscEnv, one per hie.yaml file
   hscEnvs <- newVar Map.empty :: IO (Var HieMap)
   -- Mapping from a Filepath to HscEnv
@@ -243,7 +259,7 @@ loadSession dir = do
 
           -- Invalidate all the existing GhcSession build nodes by restarting the Shake session
           invalidateShakeCache
-          restartShakeSession [kick]
+          restartShakeSession []
 
           -- Typecheck all files in the project on startup
           unless (null cs || not checkProject) $ do
@@ -368,7 +384,7 @@ emptyHscEnv :: IORef NameCache -> FilePath -> IO HscEnv
 emptyHscEnv nc libDir = do
     env <- runGhc (Just libDir) getSession
     initDynLinker env
-    pure $ setNameCache nc env
+    pure $ setNameCache nc env{ hsc_dflags = (hsc_dflags env){useUnicode = True } }
 
 data TargetDetails = TargetDetails
   {
@@ -638,7 +654,8 @@ memoIO op = do
 -- | Throws if package flags are unsatisfiable
 setOptions :: GhcMonad m => ComponentOptions -> DynFlags -> m (DynFlags, [GHC.Target])
 setOptions (ComponentOptions theOpts compRoot _) dflags = do
-    (dflags', targets) <- addCmdOpts theOpts dflags
+    (dflags', targets') <- addCmdOpts theOpts dflags
+    let targets = makeTargetsAbsolute compRoot targets'
     let dflags'' =
           disableWarningsAsErrors $
           -- disabled, generated directly by ghcide instead
@@ -664,7 +681,7 @@ setOptions (ComponentOptions theOpts compRoot _) dflags = do
 setLinkerOptions :: DynFlags -> DynFlags
 setLinkerOptions df = df {
     ghcLink   = LinkInMemory
-  , hscTarget = HscAsm
+  , hscTarget = HscNothing
   , ghcMode = CompManager
   }
 
@@ -699,10 +716,11 @@ cacheDir = "ghcide"
 notifyUserImplicitCradle:: FilePath -> FromServerMessage
 notifyUserImplicitCradle fp =
     NotShowMessage $
-    NotificationMessage "2.0" WindowShowMessage $ ShowMessageParams MtWarning $
+    NotificationMessage "2.0" WindowShowMessage $ ShowMessageParams MtInfo $
       "No [cradle](https://github.com/mpickering/hie-bios#hie-bios) found for "
       <> T.pack fp <>
-      ".\n Proceeding with [implicit cradle](https://hackage.haskell.org/package/implicit-hie)"
+      ".\n Proceeding with [implicit cradle](https://hackage.haskell.org/package/implicit-hie).\n\
+      \You should ignore this message, unless you see a 'Multi Cradle: No prefixes matched' error."
 
 notifyCradleLoaded :: FilePath -> FromServerMessage
 notifyCradleLoaded fp =

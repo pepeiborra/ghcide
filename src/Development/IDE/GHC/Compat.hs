@@ -10,7 +10,6 @@
 
 -- | Attempt at hiding the GHC version differences we can.
 module Development.IDE.GHC.Compat(
-    getHeaderImports,
     HieFileResult(..),
     HieFile(..),
     NameCacheUpdater(..),
@@ -29,8 +28,6 @@ module Development.IDE.GHC.Compat(
     addBootSuffixLocnOut,
 #endif
     hPutStringBuffer,
-    includePathsGlobal,
-    includePathsQuote,
     addIncludePathsQuote,
     getModuleHash,
     getPackageName,
@@ -38,6 +35,7 @@ module Development.IDE.GHC.Compat(
     GHC.ModLocation,
     Module.addBootSuffix,
     pattern ModLocation,
+    pattern ExposePackage,
     HasSrcSpan,
     getLoc,
     upNameCache,
@@ -47,26 +45,29 @@ module Development.IDE.GHC.Compat(
 
 #if MIN_GHC_API_VERSION(8,10,0)
     module GHC.Hs.Extension,
+    module LinkerTypes,
 #else
     module HsExtension,
     noExtField,
+    linkableTime,
 #endif
 
     module GHC,
+    module DynFlags,
     initializePlugins,
     applyPluginsParsedResultAction,
-#if MIN_GHC_API_VERSION(8,8,0)
-    module HieTypes,
-    module HieUtils,
-#else
-    module Development.IDE.GHC.HieTypes,
-    module Development.IDE.GHC.HieUtils,
-#endif
+    module Compat.HieTypes,
+    module Compat.HieUtils,
 
     ) where
 
+#if MIN_GHC_API_VERSION(8,10,0)
+import LinkerTypes
+#endif
+
 import StringBuffer
-import DynFlags
+import qualified DynFlags
+import DynFlags hiding (ExposePackage)
 import Fingerprint (Fingerprint)
 import qualified Module
 import Packages
@@ -76,6 +77,10 @@ import NameCache
 import qualified Data.ByteString as BS
 import MkIface
 import TcRnTypes
+import Compat.HieAst (mkHieFile,enrichHie)
+import Compat.HieBin
+import Compat.HieTypes
+import Compat.HieUtils
 
 #if MIN_GHC_API_VERSION(8,10,0)
 import GHC.Hs.Extension
@@ -90,37 +95,24 @@ import GHC hiding (
       lookupName,
       getLoc
     )
-import qualified HeaderInfo as Hdr
 import Avail
 #if MIN_GHC_API_VERSION(8,8,0)
 import Data.List (foldl')
 #else
 import Data.List (foldl', isSuffixOf)
 #endif
-import ErrUtils (ErrorMessages)
-import FastString (FastString)
 
-import Development.IDE.GHC.HieAst (mkHieFile,enrichHie)
-import Development.IDE.GHC.HieBin
 import DynamicLoading
 import Plugins (Plugin(parsedResultAction), withPlugins)
 import Data.Map.Strict (Map)
 
-#if MIN_GHC_API_VERSION(8,8,0)
-import HieUtils
-import HieTypes
-#else
-import Development.IDE.GHC.HieUtils
-import Development.IDE.GHC.HieTypes
+#if !MIN_GHC_API_VERSION(8,8,0)
 import System.FilePath ((-<.>))
 #endif
 
 #if !MIN_GHC_API_VERSION(8,8,0)
 import qualified EnumSet
 
-import GhcPlugins (srcErrorMessages)
-
-import Control.Exception (catch)
 import System.IO
 import Foreign.ForeignPtr
 
@@ -232,21 +224,7 @@ nameListFromAvails :: [AvailInfo] -> [(SrcSpan, Name)]
 nameListFromAvails as =
   map (\n -> (nameSrcSpan n, n)) (concatMap availNames as)
 
-getHeaderImports
-  :: DynFlags
-  -> StringBuffer
-  -> FilePath
-  -> FilePath
-  -> IO
-       ( Either
-           ErrorMessages
-           ( [(Maybe FastString, Located ModuleName)]
-           , [(Maybe FastString, Located ModuleName)]
-           , Located ModuleName
-           )
-       )
 #if MIN_GHC_API_VERSION(8,8,0)
-getHeaderImports = Hdr.getImports
 
 type HasSrcSpan = GHC.HasSrcSpan
 getLoc :: HasSrcSpan a => a -> SrcSpan
@@ -260,10 +238,6 @@ instance HasSrcSpan Name where
     getLoc = nameSrcSpan
 instance HasSrcSpan (GenLocated SrcSpan a) where
     getLoc = GHC.getLoc
-
-getHeaderImports a b c d =
-    catch (Right <$> Hdr.getImports a b c d)
-          (return . Left . srcErrorMessages)
 
 -- | Add the @-boot@ suffix to all output file paths associated with the
 -- module, not including the input file itself
@@ -298,6 +272,14 @@ applyPluginsParsedResultAction :: HscEnv -> DynFlags -> ModSummary -> ApiAnns ->
 applyPluginsParsedResultAction env dflags ms hpm_annotations parsed = do
   -- Apply parsedResultAction of plugins
   let applyPluginAction p opts = parsedResultAction p opts ms
-  fmap hpm_module $ 
-    runHsc env $ withPlugins dflags applyPluginAction 
+  fmap hpm_module $
+    runHsc env $ withPlugins dflags applyPluginAction
       (HsParsedModule parsed [] hpm_annotations)
+
+pattern ExposePackage :: String -> PackageArg -> ModRenaming -> PackageFlag
+-- https://github.com/facebook/fbghc
+#ifdef __FACEBOOK_HASKELL__
+pattern ExposePackage s a mr <- DynFlags.ExposePackage s a _ mr
+#else
+pattern ExposePackage s a mr = DynFlags.ExposePackage s a mr
+#endif
