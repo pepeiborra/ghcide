@@ -5,7 +5,7 @@
 #
 #     - Bump the nixpkgs version using `niv update nixpkgs`
 
-{ compiler ? "default",
+{ compiler ? "ghc884s",
   withHoogle ? false,
   nixpkgs ? import ./nix {}
  }:
